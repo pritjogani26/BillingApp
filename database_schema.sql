@@ -2,180 +2,251 @@
 -- ROLES
 -- ============================================================
 CREATE TABLE roles (
-    role_id     SERIAL PRIMARY KEY,
-    role        VARCHAR(50)         -- e.g. 'SUPERADMIN', 'ADMIN', 'STAFF'
+    role_id SERIAL PRIMARY KEY,
+    role_name VARCHAR(50) NOT NULL UNIQUE
 );
 
+INSERT INTO roles (role_name)
+VALUES
+('SUPERADMIN'),
+('ADMIN'),
+('STAFF');
+
+
+-- ============================================================
+-- invoice sequences
+-- ============================================================
 CREATE TABLE invoice_sequences (
-    id SERIAL PRIMARY KEY,
-    sequence_name VARCHAR(100) NOT NULL,
-    next_number INTEGER DEFAULT 1,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    sequence_id SERIAL PRIMARY KEY,
+    sequence_name VARCHAR(100) NOT NULL UNIQUE,
+    next_number INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 INSERT INTO invoice_sequences (sequence_name, next_number)
 VALUES
-('GST_INVOICE', 1),
+('TAX_INVOICE', 1),
 ('RETAIL_INVOICE', 1);
+
 
 -- ============================================================
 -- COMPANY PROFILE
 -- ============================================================
-CREATE TABLE company_profile (
+CREATE TABLE company (
     company_id      SERIAL PRIMARY KEY,
-    company_name    VARCHAR(255),               -- e.g. 'Acme Pvt Ltd'
-    gstin           VARCHAR(20),                -- e.g. '27AAPFU0939F1ZV'
-    pan_number      VARCHAR(20),                -- e.g. 'AAPFU0939F'
-    address         TEXT,                       -- e.g. '12, MG Road, Pune'
-    city            VARCHAR(100),               -- e.g. 'Pune'
-    state           VARCHAR(100),               -- e.g. 'Maharashtra'
-    pincode         VARCHAR(20),                -- e.g. '411001'
-    phone           VARCHAR(20),                -- e.g. '9876543210'
-    email           VARCHAR(255),               -- e.g. 'contact@acme.com'
-    bank_name       VARCHAR(255),               -- e.g. 'HDFC Bank'
-    account_number  VARCHAR(100),               -- e.g. '50100123456789'
-    ifsc_code       VARCHAR(20),                -- e.g. 'HDFC0001234'
-    logo_path       TEXT,                       -- e.g. '/uploads/logos/acme.png'
-    created_at      TIMESTAMPTZ,
-    created_by      INT,                        -- e.g. 1
+    company_name    VARCHAR(255) NOT NULL,
+    gstin           VARCHAR(15) UNIQUE,
+    pan_number      VARCHAR(10),
+
+    address         TEXT,
+    city            VARCHAR(100),
+    state           VARCHAR(100),
+    pincode         VARCHAR(10),
+
+    phone           VARCHAR(20),
+    email           VARCHAR(255),
+
+    bank_name       VARCHAR(255),
+    account_number  VARCHAR(100),
+    ifsc_code       VARCHAR(20),
+
+    logo_path       TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by      INT,
     updated_at      TIMESTAMPTZ,
-    updated_by      INT                         -- e.g. 2
+    updated_by      INT
 );
+
+CREATE INDEX idx_company_name
+ON company(company_name);
 
 
 -- ============================================================
 -- USERS
 -- ============================================================
 CREATE TABLE users (
-    user_id     SERIAL PRIMARY KEY,
-    company_id  INT REFERENCES company_profile(company_id),     -- e.g. 1
-    username    VARCHAR(100),                                    -- e.g. 'john.doe'
-    password    TEXT,                                            -- hashed value
-    full_name   VARCHAR(150),                                    -- e.g. 'John Doe'
-    role        INT REFERENCES roles(role_id),                   -- e.g. 2  ← changed
-    status      CHAR,                                            -- 'A' = Active, 'I' = Inactive, 'D' = Deleted
-    created_at  TIMESTAMPTZ,
-    created_by  INT,                                             -- e.g. 1
-    updated_at  TIMESTAMPTZ,
-    updated_by  INT                                              -- e.g. 2
+    user_id         SERIAL PRIMARY KEY,
+    company_id      INT NOT NULL REFERENCES company(company_id),
+    username        VARCHAR(100) NOT NULL UNIQUE,
+    password_hash   TEXT NOT NULL,
+    full_name       VARCHAR(150) NOT NULL,
+    role_id         INT NOT NULL REFERENCES roles(role_id),
+    status          CHAR(1) NOT NULL DEFAULT 'A',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by      INT,
+    updated_at      TIMESTAMPTZ,
+    updated_by      INT
 );
+
+CREATE INDEX idx_users_company_status
+ON users(company_id, status);
 
 
 -- ============================================================
 -- CUSTOMERS
 -- ============================================================
 CREATE TABLE customers (
-    customer_id     SERIAL PRIMARY KEY,
-    company_id      INT REFERENCES company_profile(company_id), -- e.g. 1
-    company_name    VARCHAR(255),               -- e.g. 'Beta Traders'
-    contact_person  VARCHAR(255),               -- e.g. 'Ravi Sharma'
-    gstin           VARCHAR(20),                -- e.g. '27AAPFU0939F1ZV'
-    pan_number      VARCHAR(20),                -- e.g. 'AAPFU0939F'
-    address         TEXT,                       -- e.g. '45, Nehru Nagar, Mumbai'
-    city            VARCHAR(100),               -- e.g. 'Mumbai'
-    state           VARCHAR(100),               -- e.g. 'Maharashtra'
-    pincode         VARCHAR(20),                -- e.g. '400001'
-    mobile          VARCHAR(20),                -- e.g. '9123456789'
-    email           VARCHAR(255),               -- e.g. 'ravi@betatraders.com'
-    rate            DECIMAL(10,2),              -- e.g. 1500.00 (custom pricing rate)
-    status          CHAR,                       -- 'A' = Active, 'I' = Inactive, 'D' = Deleted
-    created_at      TIMESTAMPTZ,
-    created_by      INT,                        -- e.g. 1
-    updated_at      TIMESTAMPTZ,
-    updated_by      INT                         -- e.g. 2
+    customer_id         SERIAL PRIMARY KEY,
+    company_id          INT NOT NULL REFERENCES company(company_id),
+    customer_name       VARCHAR(255) NOT NULL,
+    contact_person      VARCHAR(255),
+
+    gstin               VARCHAR(15),
+    pan_number          VARCHAR(10),
+
+    address             TEXT,
+    city                VARCHAR(100),
+    state               VARCHAR(100),
+    pincode             VARCHAR(10),
+
+    mobile              VARCHAR(20),
+    email               VARCHAR(255),
+
+    default_rate        DECIMAL(10,2) DEFAULT 0,
+    status              CHAR(1) NOT NULL DEFAULT 'A',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by          INT,
+    updated_at          TIMESTAMPTZ,
+    updated_by          INT,
+
+    CONSTRAINT uq_customers_company_name
+        UNIQUE(company_id, customer_name)
 );
+
+CREATE INDEX idx_customers_company_status
+ON customers(company_id, status);
+
+CREATE INDEX idx_customers_company_name
+ON customers(company_id, customer_name);
 
 
 -- ============================================================
 -- PRODUCTS
 -- ============================================================
 CREATE TABLE products (
-    product_id      SERIAL PRIMARY KEY,
-    company_id      INT REFERENCES company_profile(company_id), -- e.g. 1
-    customer_id     INT REFERENCES customers(customer_id),      -- e.g. 5  ← added
-    product_name    VARCHAR(255),                                -- e.g. 'Flex Banner 13oz'
-    hsn_code        VARCHAR(20),                                 -- e.g. '4911'
-    gst_percentage  DECIMAL(5,2),                                -- e.g. 18.00
-    height          DECIMAL(10,2),                               -- e.g. 4.00 (in feet)
-    width           DECIMAL(10,2),                               -- e.g. 6.00 (in feet)
-    price           DECIMAL(12,2),                               -- e.g. 35.00 (per sq ft)
-    description     TEXT,                                        -- e.g. 'Premium outdoor flex banner'
-    status          CHAR,                                        -- 'A' = Active, 'I' = Inactive, 'D' = Deleted
-    created_at      TIMESTAMPTZ,
-    created_by      INT,                                         -- e.g. 1
-    updated_at      TIMESTAMPTZ,
-    updated_by      INT                                          -- e.g. 2
+    product_id          SERIAL PRIMARY KEY,
+    company_id          INT NOT NULL REFERENCES company(company_id),
+    customer_id         INT REFERENCES customers(customer_id) -- Just Reference, not mandatory
+    product_name        VARCHAR(255) NOT NULL,
+    hsn_code            VARCHAR(20),
+    gst_percentage DECIMAL(5,2) DEFAULT 0,
+    height              DECIMAL(10,2),
+    width               DECIMAL(10,2),
+    unit_price          DECIMAL(12,2),
+    description         TEXT,
+    status              CHAR(1) NOT NULL DEFAULT 'A',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by          INT,
+    updated_at          TIMESTAMPTZ,
+    updated_by          INT,
+
+    CONSTRAINT uq_products_company_name
+        UNIQUE(company_id, product_name)
 );
+
+CREATE INDEX idx_products_company_status
+ON products(company_id, status);
+
+CREATE INDEX idx_products_company_name
+ON products(company_id, product_name);
 
 
 -- ============================================================
 -- INVOICES
 -- ============================================================
-CREATE TABLE invoices
- (
-    invoice_id      SERIAL PRIMARY KEY,
-    company_id      INT REFERENCES company_profile(company_id),         -- e.g. 1
-    customer_id     INT REFERENCES customers(customer_id),              -- e.g. 5
-    invoice_number  VARCHAR(100),                                        -- e.g. 'INV-2024-0001'
-    invoice_type    VARCHAR(20),                                         -- 'GST' or 'NON_GST'
-    invoice_date    DATE,                                                -- e.g. '2024-07-15'
-    due_date        DATE,                                                -- e.g. '2024-07-15'
-    subtotal        DECIMAL(12,2),                                       -- e.g. 5000.00
-    cgst_amount     DECIMAL(12,2),                                       -- e.g. 450.00
-    sgst_amount     DECIMAL(12,2),                                       -- e.g. 450.00
-    igst_amount     DECIMAL(12,2),                                       -- e.g. 0.00
-    discount_amount DECIMAL(12,2) default 0.00,                            -- e.g. 200.00
-    round_off       DECIMAL(12,2),                                       -- e.g. 0.50
-    grand_total     DECIMAL(12,2),                                       -- e.g. 5700.50
-    due_amount      DECIMAL(12,2),                                       -- e.g. 2700.50
-    payment_status  VARCHAR(20),                                         -- 'PENDING', 'PARTIAL', 'PAID'
-    status          CHAR,                                                -- 'A' = Active, 'D' = Deleted  ← added
-    notes           TEXT,                                                -- e.g. 'Delivery within 3 days'
-    created_at      TIMESTAMPTZ,
-    created_by      INT,                                                 -- e.g. 1
-    updated_at      TIMESTAMPTZ,
-    updated_by      INT                                                  -- e.g. 2
+CREATE TABLE invoices (
+    invoice_id          SERIAL PRIMARY KEY,
+    company_id          INT NOT NULL REFERENCES company(company_id),
+    customer_id         INT NOT NULL REFERENCES customers(customer_id),
+    invoice_number      VARCHAR(50) NOT NULL,
+    invoice_type VARCHAR(20) NOT NULL CHECK (invoice_type IN ('TAX', 'RETAIL')),
+    invoice_date DATE NOT NULL,
+    financial_year VARCHAR(10) NOT NULL,
+    due_date DATE,
+    subtotal            DECIMAL(12,2) NOT NULL,
+    cgst_amount         DECIMAL(12,2) NOT NULL DEFAULT 0,
+    sgst_amount         DECIMAL(12,2) NOT NULL DEFAULT 0,
+    igst_amount         DECIMAL(12,2) NOT NULL DEFAULT 0,
+    discount_amount     DECIMAL(12,2) NOT NULL DEFAULT 0,
+    round_off           DECIMAL(12,2) NOT NULL DEFAULT 0,
+    grand_total         DECIMAL(12,2) NOT NULL,
+    due_amount          DECIMAL(12,2) NOT NULL,
+    payment_status      VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    status              CHAR(1) NOT NULL DEFAULT 'A',
+    notes               TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by          INT,
+    updated_at          TIMESTAMPTZ,
+    updated_by          INT,
+
+    CONSTRAINT uq_invoices_company_invoice_no
+        UNIQUE(company_id, invoice_number)
 );
+CREATE INDEX idx_invoices_company_date
+ON invoices(company_id, invoice_date);
+
+CREATE INDEX idx_invoices_company_payment_status
+ON invoices(company_id, payment_status);
+
+CREATE INDEX idx_invoices_customer_date
+ON invoices(customer_id, invoice_date DESC);
 
 
-
+-- ============================================================
+-- INVOICE ITEMS
+-- ============================================================
 CREATE TABLE invoice_items (
-    item_id         SERIAL PRIMARY KEY,
-    invoice_id      INT REFERENCES invoices(invoice_id) ON DELETE CASCADE, -- e.g. 10
-    company_id      INT REFERENCES company_profile(company_id),            -- e.g. 1
-    product_id      INT REFERENCES products(product_id),                   -- e.g. 3
-    product_name    VARCHAR(255),                               -- e.g. 'Flex Banner 13oz'  ← added
-    hsn_code        VARCHAR(20), 
-    quantity        DECIMAL(12,2),                              -- e.g. 24.00 (sq ft)
-    unit_price      DECIMAL(12,2),                              -- e.g. 35.00
-    gst_percentage  DECIMAL(5,2),                               -- e.g. 18.00
-    taxable_amount  DECIMAL(12,2),                              -- e.g. 840.00
-    cgst_amount     DECIMAL(12,2),                              -- e.g. 75.60
-    sgst_amount     DECIMAL(12,2),                              -- e.g. 75.60
-    igst_amount     DECIMAL(12,2),                              -- e.g. 0.00
-    total_amount    DECIMAL(12,2),                              -- e.g. 991.20
-    status          CHAR,                                       -- 'A' = Active, 'D' = Deleted  ← added
-    created_at      TIMESTAMPTZ                                 -- e.g. '2024-07-15 10:30:00+05:30'  ← added
+    item_id             SERIAL PRIMARY KEY,
+    invoice_id          INT NOT NULL REFERENCES invoices(invoice_id) ON DELETE CASCADE,
+    company_id          INT NOT NULL REFERENCES company(company_id),
+    product_id          INT REFERENCES products(product_id),
+    product_name        VARCHAR(255) NOT NULL,
+    hsn_code            VARCHAR(20),
+    quantity            DECIMAL(12,2) NOT NULL,
+    unit_price          DECIMAL(12,2) NOT NULL,
+    gst_percentage      DECIMAL(5,2) NOT NULL DEFAULT 0,
+    taxable_amount      DECIMAL(12,2) NOT NULL,
+    cgst_amount         DECIMAL(12,2) NOT NULL DEFAULT 0,
+    sgst_amount         DECIMAL(12,2) NOT NULL DEFAULT 0,
+    igst_amount         DECIMAL(12,2) NOT NULL DEFAULT 0,
+    total_amount        DECIMAL(12,2) NOT NULL,
+    status              CHAR(1) NOT NULL DEFAULT 'A',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX idx_invoice_items_invoice
+ON invoice_items(invoice_id);
+
+CREATE INDEX idx_invoice_items_company
+ON invoice_items(company_id);
 
 -- ============================================================
 -- PAYMENTS
 -- ============================================================
 CREATE TABLE payments (
     payment_id          SERIAL PRIMARY KEY,
-    invoice_id          INT REFERENCES invoices(invoice_id),            -- e.g. 10
-    company_id          INT REFERENCES company_profile(company_id),     -- e.g. 1
-    customer_id         INT REFERENCES customers(customer_id),          -- e.g. 5
-    payment_date        DATE,                                            -- e.g. '2024-07-20'
-    payment_method      VARCHAR(50),                                     -- 'CASH', 'BANK', 'UPI', 'CHEQUE'
-    reference_number    VARCHAR(255),                                    -- e.g. 'TXN123456789'
-    amount              DECIMAL(12,2),                                   -- e.g. 3000.00
-    notes               TEXT,                                            -- e.g. 'Partial payment received'
-    created_at          TIMESTAMPTZ,
-    created_by          INT,                                             -- e.g. 1  ← added
-    updated_at          TIMESTAMPTZ,                                     -- ← added
-    updated_by          INT                                              -- e.g. 2  ← added
+    company_id          INT NOT NULL REFERENCES company(company_id),
+    customer_id         INT NOT NULL REFERENCES customers(customer_id),
+    invoice_id          INT REFERENCES invoices(invoice_id),
+    payment_date        DATE NOT NULL,
+    payment_method      VARCHAR(50) NOT NULL,
+    reference_number    VARCHAR(255),
+    amount              DECIMAL(12,2) NOT NULL,
+    notes               TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by          INT,
+    updated_at          TIMESTAMPTZ,
+    updated_by          INT
 );
+
+CREATE INDEX idx_payments_customer_date
+ON payments(customer_id, payment_date DESC);
+
+CREATE INDEX idx_payments_company_date
+ON payments(company_id, payment_date);
+
+CREATE INDEX idx_payments_invoice
+ON payments(invoice_id);
 
 
 
@@ -184,54 +255,24 @@ CREATE TABLE payments (
 -- ============================================================
 CREATE TABLE ledger_entries (
     entry_id                    SERIAL PRIMARY KEY,
-    company_id                  INT REFERENCES company_profile(company_id),  -- e.g. 1
-    customer_id                 INT REFERENCES customers(customer_id),       -- e.g. 5
-    transaction_type            VARCHAR(20),    -- 'DEBIT' or 'CREDIT'
-    reference_type              VARCHAR(50),    -- 'INVOICE' or 'PAYMENT'
-    reference_id                INT,            -- e.g. 10 (invoice_id or payment_id)
-    transaction_date            DATE,           -- e.g. '2024-07-15'
-    debit_amount                DECIMAL(12,2),  -- e.g. 5700.50
-    credit_amount               DECIMAL(12,2),  -- e.g. 0.00
-    balance_after_transaction   DECIMAL(12,2),  -- e.g. 8700.50
-    remarks                     TEXT,           -- e.g. 'Invoice INV-2024-0001 raised'
-    created_at                  TIMESTAMPTZ
+    company_id                  INT NOT NULL REFERENCES company(company_id),
+    customer_id                 INT NOT NULL REFERENCES customers(customer_id),
+    transaction_type            VARCHAR(20) NOT NULL,
+    reference_type              VARCHAR(20) NOT NULL,
+    reference_id                INT NOT NULL,
+    transaction_date            DATE NOT NULL,
+    debit_amount                DECIMAL(12,2) NOT NULL DEFAULT 0,
+    credit_amount               DECIMAL(12,2) NOT NULL DEFAULT 0,
+    running_balance             DECIMAL(12,2) NOT NULL,
+    remarks                     TEXT,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX idx_ledger_customer_date
+ON ledger_entries(customer_id, transaction_date);
 
--- ============================================================
--- GST REPORTS
--- ============================================================
-CREATE TABLE gst_reports (
-    report_id               SERIAL PRIMARY KEY,
-    company_id              INT REFERENCES company_profile(company_id), -- e.g. 1
-    month                   INT,                                         -- e.g. 7 (July)
-    year                    INT,                                         -- e.g. 2024
-    total_taxable_amount    DECIMAL(12,2),                               -- e.g. 150000.00
-    total_cgst              DECIMAL(12,2),                               -- e.g. 13500.00
-    total_sgst              DECIMAL(12,2),                               -- e.g. 13500.00
-    total_igst              DECIMAL(12,2),                               -- e.g. 2000.00
-    status                  CHAR,                                        -- 'A' = Active, 'D' = Deleted  ← added
-    generated_at            TIMESTAMPTZ
-);
+CREATE INDEX idx_ledger_company_customer
+ON ledger_entries(company_id, customer_id);
 
-
--- ============================================================
--- PERFORMANCE INDEXES
--- ============================================================
-
--- invoices: dashboard pending/collected, outstanding report
-CREATE INDEX IF NOT EXISTS idx_invoices_company_status
-    ON invoices(company_id, payment_status);
-
--- invoices: monthly sales trend queries
-CREATE INDEX IF NOT EXISTS idx_invoices_company_date
-    ON invoices(company_id, invoice_date);
-
--- ledger_entries: running balance lookup (ORDER BY entry_id DESC LIMIT 1)
--- and all ledger list queries
-CREATE INDEX IF NOT EXISTS idx_ledger_company_customer_entry
-    ON ledger_entries(company_id, customer_id, entry_id DESC);
-
--- customers: all customer list queries filter on company_id + status
-CREATE INDEX IF NOT EXISTS idx_customers_company_status
-    ON customers(company_id, status);
+CREATE INDEX idx_ledger_reference
+ON ledger_entries(reference_type, reference_id);
