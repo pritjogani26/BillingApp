@@ -1,0 +1,38 @@
+Jogani Accounts
+
+npm create @quick-start/electron@latest billing-desktop
+
+✔ Framework: React
+✔ Language: TypeScript
+
+cd billing-desktop
+npm install
+npm run dev
+
+
+
+
+# GST Billing Desktop Application
+
+The GST Billing Desktop Application is a Windows-based billing and accounting software designed for manufacturing businesses to efficiently manage customers, products, invoices, taxation, and financial records. The application provides a user-friendly interface for generating GST and non-GST invoices, maintaining customer ledgers, tracking payments, and producing detailed business reports.
+
+Built using React, TypeScript, Electron, Django, and PostgreSQL, the software offers the performance of a desktop application while leveraging modern web technologies. Users can create and manage customer profiles, maintain product catalogs, generate professional PDF invoices, send invoices via email, and monitor outstanding balances.
+
+The system includes comprehensive reporting features such as Sales Reports, GST Reports, Customer-wise Reports, Product-wise Reports, Monthly Sales Summaries, and Outstanding Payment Reports. It also supports GST compliance through tax calculations, HSN code management, and GST return summaries.
+
+Key Features:
+
+* Customer and Party Management
+* Product and Inventory Management
+* GST and Non-GST Invoice Generation
+* PDF Invoice Download and Printing
+* Email Invoice Delivery
+* Customer Ledger and Account Statements
+* Payment Tracking and Outstanding Management
+* GST Reports and Tax Summaries
+* Sales and Financial Reports
+* Role-Based User Access (Super Admin, Admin, Staff)
+* Secure PostgreSQL Database Storage
+* Windows Desktop Application with Offline Capability
+
+The application is designed to simplify daily billing operations, improve financial record management, and ensure accurate GST compliance for small and medium-scale manufacturing businesses.

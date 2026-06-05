@@ -6,7 +6,17 @@ CREATE TABLE roles (
     role        VARCHAR(50)         -- e.g. 'SUPERADMIN', 'ADMIN', 'STAFF'
 );
 
+CREATE TABLE invoice_sequences (
+    id SERIAL PRIMARY KEY,
+    sequence_name VARCHAR(100) NOT NULL,
+    next_number INTEGER DEFAULT 1,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
+INSERT INTO invoice_sequences (sequence_name, next_number)
+VALUES
+('GST_INVOICE', 1),
+('RETAIL_INVOICE', 1);
 
 -- ============================================================
 -- COMPANY PROFILE
@@ -26,7 +36,6 @@ CREATE TABLE company_profile (
     account_number  VARCHAR(100),               -- e.g. '50100123456789'
     ifsc_code       VARCHAR(20),                -- e.g. 'HDFC0001234'
     logo_path       TEXT,                       -- e.g. '/uploads/logos/acme.png'
-    invoice_prefix  VARCHAR(20),                -- e.g. 'INV', 'ACM'
     created_at      TIMESTAMPTZ,
     created_by      INT,                        -- e.g. 1
     updated_at      TIMESTAMPTZ,
@@ -102,18 +111,20 @@ CREATE TABLE products (
 -- ============================================================
 -- INVOICES
 -- ============================================================
-CREATE TABLE invoices (
+CREATE TABLE invoices
+ (
     invoice_id      SERIAL PRIMARY KEY,
     company_id      INT REFERENCES company_profile(company_id),         -- e.g. 1
     customer_id     INT REFERENCES customers(customer_id),              -- e.g. 5
     invoice_number  VARCHAR(100),                                        -- e.g. 'INV-2024-0001'
     invoice_type    VARCHAR(20),                                         -- 'GST' or 'NON_GST'
     invoice_date    DATE,                                                -- e.g. '2024-07-15'
+    due_date        DATE,                                                -- e.g. '2024-07-15'
     subtotal        DECIMAL(12,2),                                       -- e.g. 5000.00
     cgst_amount     DECIMAL(12,2),                                       -- e.g. 450.00
     sgst_amount     DECIMAL(12,2),                                       -- e.g. 450.00
     igst_amount     DECIMAL(12,2),                                       -- e.g. 0.00
-    discount_amount DECIMAL(12,2),                                       -- e.g. 200.00
+    discount_amount DECIMAL(12,2) default 0.00,                            -- e.g. 200.00
     round_off       DECIMAL(12,2),                                       -- e.g. 0.50
     grand_total     DECIMAL(12,2),                                       -- e.g. 5700.50
     due_amount      DECIMAL(12,2),                                       -- e.g. 2700.50
@@ -134,6 +145,7 @@ CREATE TABLE invoice_items (
     company_id      INT REFERENCES company_profile(company_id),            -- e.g. 1
     product_id      INT REFERENCES products(product_id),                   -- e.g. 3
     product_name    VARCHAR(255),                               -- e.g. 'Flex Banner 13oz'  ← added
+    hsn_code        VARCHAR(20), 
     quantity        DECIMAL(12,2),                              -- e.g. 24.00 (sq ft)
     unit_price      DECIMAL(12,2),                              -- e.g. 35.00
     gst_percentage  DECIMAL(5,2),                               -- e.g. 18.00
@@ -222,4 +234,4 @@ CREATE INDEX IF NOT EXISTS idx_ledger_company_customer_entry
 
 -- customers: all customer list queries filter on company_id + status
 CREATE INDEX IF NOT EXISTS idx_customers_company_status
-    ON customers(company_id, status);
+    ON customers(company_id, status);
