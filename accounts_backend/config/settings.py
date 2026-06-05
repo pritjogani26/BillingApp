@@ -1,6 +1,5 @@
-import datetime
+# config\settings.py
 import os
-import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -41,7 +40,7 @@ MIDDLEWARE = [
 ROOT_URLCONF = 'accounts_backend.urls'
 
 JWT_SECRET       = os.environ.get('JWT_SECRET', 'django-insecure-gcefzcoxjldym==7x!s1j0$bk#bf3*jxdc1f(r^53bs6gjbfo1')
-JWT_EXPIRY_DAY = 7
+JWT_EXPIRY_HOURS = 168
 
 TEMPLATES = [
     {
@@ -72,7 +71,7 @@ DATABASES = {
     }
 }
 
-CORS_ALLOWED_ORIGINS  = ['http://localhost:5173']
+# CORS_ALLOWED_ORIGINS  = ['http://localhost:5173']
 CORS_ALLOW_ALL_ORIGINS  = True
 CORS_ALLOW_CREDENTIALS = True
 CSRF_COOKIE_SECURE = False

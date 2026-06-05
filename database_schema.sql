@@ -126,7 +126,7 @@ ON customers(company_id, customer_name);
 CREATE TABLE products (
     product_id          SERIAL PRIMARY KEY,
     company_id          INT NOT NULL REFERENCES company(company_id),
-    customer_id         INT REFERENCES customers(customer_id) -- Just Reference, not mandatory
+    customer_id         INT REFERENCES customers(customer_id), -- Just Reference, not mandatory
     product_name        VARCHAR(255) NOT NULL,
     hsn_code            VARCHAR(20),
     gst_percentage DECIMAL(5,2) DEFAULT 0,
@@ -141,7 +141,7 @@ CREATE TABLE products (
     updated_by          INT,
 
     CONSTRAINT uq_products_company_name
-        UNIQUE(company_id, product_name)
+        UNIQUE(company_id, customer_id, product_name)
 );
 
 CREATE INDEX idx_products_company_status
