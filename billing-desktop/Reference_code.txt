@@ -1,0 +1,1379 @@
+Electron main process - frameless window with IPC controls
+main.js
+
+const { app, BrowserWindow, ipcMain } = require('electron')
+const path = require('path')
+
+const isDev = !app.isPackaged
+
+let mainWindow
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1366,
+    height: 768,
+    minWidth: 1100,
+    minHeight: 650,
+    frame: false,
+    backgroundColor: '#F1F5F9',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: false, // allow localhost API calls in dev
+    },
+    show: false,
+  })
+
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173')
+    // Uncomment to open DevTools:
+    // mainWindow.webContents.openDevTools()
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+  }
+
+  mainWindow.once('ready-to-show', () => mainWindow.show())
+
+  mainWindow.on('closed', () => { mainWindow = null })
+}
+
+ipcMain.on('window-minimize', () => mainWindow?.minimize())
+ipcMain.on('window-maximize', () => {
+  if (mainWindow?.isMaximized()) mainWindow.restore()
+  else mainWindow?.maximize()
+})
+ipcMain.on('window-close', () => mainWindow?.close())
+
+app.whenReady().then(createWindow)
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+})
+
+
+
+
+
+
+
+React entry point
+main.jsx
+
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import { HashRouter } from 'react-router-dom'
+import App from './App.jsx'
+import './index.css'
+ 
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <HashRouter>
+      <App />
+    </HashRouter>
+  </React.StrictMode>
+)
+ 
+
+
+
+App.jsx - root routes and auth guard
+App.jsx
+
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import TitleBar from './components/TitleBar'
+import Layout from './components/Layout'
+import Login from './pages/Login'
+import Dashboard from './pages/Dashboard'
+import Customers from './pages/Customers'
+
+function PrivateRoute({ children }) {
+  const { isAuthenticated } = useAuth()
+  return isAuthenticated ? children : <Navigate to="/login" replace />
+}
+
+function AppRoutes() {
+  const { isAuthenticated } = useAuth()
+  return (
+    <>
+      <TitleBar />
+      <Routes>
+        <Route
+          path="/login"
+          element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
+        />
+        <Route
+          path="/"
+          element={<PrivateRoute><Layout /></PrivateRoute>}
+        >
+          <Route index element={<Dashboard />} />
+          <Route path="customers" element={<Customers />} />
+          {/* Add more protected routes here as you build them */}
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
+  )
+}
+
+
+
+Global CSS - design tokens, layout, components, animations
+index.css
+
+
+/* ── Design Tokens ──────────────────────────────────────────── */
+:root {
+  --font: 'DM Sans', sans-serif;
+
+  /* Titlebar */
+  --tb-h: 38px;
+
+  /* Sidebar */
+  --sb-w:         240px;
+  --sb-bg:        #0B1426;
+  --sb-hover:     #1a2540;
+  --sb-active:    #1E2D45;
+  --sb-text:      #8898AA;
+  --sb-text-act:  #F0F4FF;
+  --sb-accent:    #4F8EF7;
+
+  /* Surface */
+  --bg:           #F0F4FA;
+  --card:         #FFFFFF;
+  --border:       #E4EAF2;
+  --border-focus: #4F8EF7;
+
+  /* Text */
+  --t1:  #0D1B2E;
+  --t2:  #4A5568;
+  --t3:  #9AA5B4;
+
+  /* Brand */
+  --primary:       #3B82F6;
+  --primary-dark:  #2563EB;
+  --primary-light: #EFF6FF;
+  --success:       #10B981;
+  --success-bg:    #ECFDF5;
+  --warning:       #F59E0B;
+  --warning-bg:    #FFFBEB;
+  --danger:        #EF4444;
+  --danger-bg:     #FEF2F2;
+
+  /* Misc */
+  --r:    8px;
+  --r-lg: 12px;
+  --sh:   0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  --sh-md:0 4px 12px rgba(0,0,0,.08);
+  --sh-lg:0 16px 32px rgba(0,0,0,.12);
+}
+
+/* ── Reset ──────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--t1);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+button { font-family: var(--font); cursor: pointer; border: none; outline: none; }
+input, textarea, select { font-family: var(--font); outline: none; }
+a { text-decoration: none; color: inherit; }
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #C8D2E0; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #A0AEBE; }
+
+/* ═══════════════════════════════════════════════════════════
+   TITLEBAR
+════════════════════════════════════════════════════════════ */
+.titlebar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--tb-h);
+  background: #070F1C;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  z-index: 9999;
+  -webkit-app-region: drag;
+}
+.tb-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+.tb-logo {
+  width: 22px; height: 22px;
+  background: var(--primary);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+}
+.tb-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #E8EFF8;
+  letter-spacing: 0.2px;
+}
+.tb-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+.tb-btn {
+  width: 28px; height: 22px;
+  border-radius: 5px;
+  background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  color: #5A6A80;
+  transition: background 0.12s, color 0.12s;
+}
+.tb-btn:hover            { background: #1A2540; color: #E8EFF8; }
+.tb-btn.tb-close:hover   { background: #C0392B; color: #fff; }
+
+/* ═══════════════════════════════════════════════════════════
+   SIDEBAR
+════════════════════════════════════════════════════════════ */
+.sidebar {
+  position: fixed;
+  top: var(--tb-h); left: 0;
+  width: var(--sb-w);
+  height: calc(100vh - var(--tb-h));
+  background: var(--sb-bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid rgba(255,255,255,0.04);
+}
+.sb-section-label {
+  padding: 18px 14px 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: #2D4060;
+}
+.sb-nav { flex: 1; padding: 6px 8px; overflow-y: auto; }
+.sb-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border-radius: var(--r);
+  color: var(--sb-text);
+  cursor: pointer;
+  transition: background 0.13s, color 0.13s;
+  margin-bottom: 2px;
+  font-size: 13.5px;
+  font-weight: 400;
+  position: relative;
+}
+.sb-item:hover           { background: var(--sb-hover); color: #C8D8F0; }
+.sb-item.active {
+  background: var(--sb-active);
+  color: var(--sb-text-act);
+  font-weight: 500;
+}
+.sb-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 18px;
+  background: var(--sb-accent);
+  border-radius: 0 3px 3px 0;
+}
+.sb-item.active .sb-icon { color: var(--sb-accent); }
+.sb-icon { flex-shrink: 0; }
+.sb-coming {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #2D4060;
+  letter-spacing: 0.3px;
+  background: #0F1D32;
+  padding: 2px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+.sb-footer {
+  padding: 10px 8px 12px;
+  border-top: 1px solid #111E34;
+}
+.sb-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  cursor: pointer;
+  transition: background 0.13s;
+}
+.sb-user:hover { background: var(--sb-hover); }
+.sb-avatar {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #3B82F6, #6366F1);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.sb-user-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #CBD8EC;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-user-role {
+  font-size: 11px;
+  color: #4A6080;
+  white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LAYOUT
+════════════════════════════════════════════════════════════ */
+.layout {
+  padding-top: var(--tb-h);
+  padding-left: var(--sb-w);
+  height: 100vh;
+  overflow-y: auto;
+}
+.page { padding: 28px 30px; }
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE HEADER
+════════════════════════════════════════════════════════════ */
+.page-hdr {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 16px;
+}
+.page-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--t1);
+  letter-spacing: -0.4px;
+  line-height: 1.2;
+}
+.page-sub {
+  font-size: 13px;
+  color: var(--t2);
+  margin-top: 3px;
+}
+.page-hdr-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   CARDS
+════════════════════════════════════════════════════════════ */
+.card {
+  background: var(--card);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+  box-shadow: var(--sh);
+  overflow: hidden;
+}
+.card-hdr {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t1);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   STAT CARDS
+════════════════════════════════════════════════════════════ */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 20px;
+  box-shadow: var(--sh);
+  transition: box-shadow 0.2s, transform 0.2s;
+  animation: fadeUp 0.35s ease both;
+}
+.stat-card:nth-child(1) { animation-delay: 0.05s; }
+.stat-card:nth-child(2) { animation-delay: 0.10s; }
+.stat-card:nth-child(3) { animation-delay: 0.15s; }
+.stat-card:nth-child(4) { animation-delay: 0.20s; }
+.stat-card:hover { box-shadow: var(--sh-md); transform: translateY(-2px); }
+.stat-icon {
+  width: 42px; height: 42px;
+  border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 16px;
+}
+.stat-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t3);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--t1);
+  letter-spacing: -0.8px;
+  line-height: 1;
+}
+.stat-sub {
+  font-size: 11.5px;
+  color: var(--t3);
+  margin-top: 5px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   BUTTONS
+════════════════════════════════════════════════════════════ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--r);
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: all 0.14s;
+  white-space: nowrap;
+  letter-spacing: 0.1px;
+}
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-primary  { background: var(--primary); color: #fff; }
+.btn-primary:hover:not(:disabled)  { background: var(--primary-dark); }
+.btn-outline  { background: #fff; color: var(--t1); border: 1px solid var(--border); }
+.btn-outline:hover:not(:disabled)  { background: var(--bg); border-color: #BDC8D8; }
+.btn-danger   { background: var(--danger); color: #fff; }
+.btn-danger:hover:not(:disabled)   { background: #DC2626; }
+.btn-ghost    { background: transparent; color: var(--t2); }
+.btn-ghost:hover:not(:disabled)    { background: var(--bg); color: var(--t1); }
+.btn-sm   { padding: 5px 10px; font-size: 12.5px; }
+.btn-icon { padding: 6px; border-radius: var(--r); }
+
+/* ═══════════════════════════════════════════════════════════
+   TABLE
+════════════════════════════════════════════════════════════ */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--t3);
+  background: #F7FAFD;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+tbody tr:hover { background: #F7FAFD; }
+tbody tr:last-child { border-bottom: none; }
+tbody td {
+  padding: 11px 16px;
+  font-size: 13.5px;
+  color: var(--t1);
+  vertical-align: middle;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   BADGES
+════════════════════════════════════════════════════════════ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.badge-green  { background: var(--success-bg); color: #059669; }
+.badge-yellow { background: var(--warning-bg); color: #D97706; }
+.badge-red    { background: var(--danger-bg);  color: #DC2626; }
+.badge-blue   { background: var(--primary-light); color: #2563EB; }
+
+/* ═══════════════════════════════════════════════════════════
+   FORM
+════════════════════════════════════════════════════════════ */
+.fgrp { margin-bottom: 14px; }
+.flabel {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t2);
+  margin-bottom: 5px;
+  letter-spacing: 0.1px;
+}
+.finput {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  font-size: 13.5px;
+  color: var(--t1);
+  background: #fff;
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+.finput:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(79,142,247,0.12);
+}
+.finput::placeholder { color: #B0BBC8; }
+.finput.err { border-color: var(--danger); }
+.ferr { color: var(--danger); font-size: 11.5px; margin-top: 4px; }
+.fgrid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.span2  { grid-column: span 2; }
+
+/* ═══════════════════════════════════════════════════════════
+   SEARCH BAR
+════════════════════════════════════════════════════════════ */
+.search-wrap { position: relative; }
+.search-icon {
+  position: absolute;
+  left: 10px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--t3);
+  pointer-events: none;
+}
+.search-input {
+  width: 280px;
+  padding: 8px 12px 8px 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  font-size: 13.5px;
+  background: #fff;
+  color: var(--t1);
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+.search-input:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(79,142,247,0.12);
+}
+.search-input::placeholder { color: #B0BBC8; }
+
+/* ═══════════════════════════════════════════════════════════
+   MODAL
+════════════════════════════════════════════════════════════ */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(7,15,28,0.55);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 800;
+  animation: fadeIn 0.15s ease;
+}
+.modal {
+  background: var(--card);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-lg);
+  width: 620px;
+  max-width: 95vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.2s ease;
+}
+.modal-sm { width: 420px; }
+.modal-hdr {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-title { font-size: 15px; font-weight: 700; color: var(--t1); }
+.modal-body  { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-ftr   {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LOGIN
+════════════════════════════════════════════════════════════ */
+.login-root {
+  display: flex;
+  height: calc(100vh - var(--tb-h));
+  margin-top: var(--tb-h);
+}
+.login-brand-panel {
+  width: 400px;
+  flex-shrink: 0;
+  background: #070F1C;
+  display: flex;
+  flex-direction: column;
+  padding: 44px 40px 36px;
+  position: relative;
+  overflow: hidden;
+}
+.login-brand-panel::before {
+  content: '';
+  position: absolute;
+  top: -100px; right: -100px;
+  width: 320px; height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(79,142,247,.15) 0%, transparent 70%);
+}
+.login-brand-panel::after {
+  content: '';
+  position: absolute;
+  bottom: -80px; left: -60px;
+  width: 240px; height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(99,102,241,.12) 0%, transparent 70%);
+}
+.login-brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 1;
+  margin-bottom: auto;
+}
+.login-brand-icon {
+  width: 46px; height: 46px;
+  background: linear-gradient(135deg, #3B82F6, #6366F1);
+  border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 20px rgba(59,130,246,0.35);
+}
+.login-brand-name { font-size: 22px; font-weight: 700; color: #EEF3FC; letter-spacing: -0.4px; }
+.login-brand-tag  { font-size: 10px; font-weight: 600; color: #2D4A70; letter-spacing: 1px; text-transform: uppercase; margin-top: 1px; }
+.login-brand-copy { z-index: 1; }
+.login-brand-headline {
+  font-size: 28px;
+  font-weight: 700;
+  color: #DDE8F8;
+  line-height: 1.25;
+  letter-spacing: -0.6px;
+  margin-bottom: 12px;
+}
+.login-brand-desc { font-size: 13.5px; color: #3A5070; line-height: 1.7; }
+.login-brand-footer { z-index: 1; margin-top: 32px; font-size: 11px; color: #1E3050; }
+
+.login-form-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #F4F8FF;
+  padding: 40px;
+}
+.login-form-box {
+  width: 100%; max-width: 360px;
+  animation: fadeUp 0.3s ease;
+}
+.login-form-box h2 {
+  font-size: 22px; font-weight: 700;
+  color: var(--t1); letter-spacing: -0.3px;
+  margin-bottom: 5px;
+}
+.login-form-box .login-sub {
+  font-size: 13.5px; color: var(--t2); margin-bottom: 28px;
+}
+.login-err {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--danger-bg);
+  border: 1px solid #FECACA;
+  border-radius: var(--r);
+  font-size: 13px; color: #B91C1C;
+  margin-bottom: 16px;
+}
+.pw-wrap { position: relative; }
+.pw-eye {
+  position: absolute;
+  right: 10px; top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--t3);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   EMPTY + LOADING
+════════════════════════════════════════════════════════════ */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  color: var(--t3);
+  text-align: center;
+}
+.empty-icon { margin-bottom: 14px; opacity: 0.35; }
+.empty-text { font-size: 14px; font-weight: 600; color: var(--t2); margin-bottom: 4px; }
+.empty-sub  { font-size: 13px; }
+.loading    { display: flex; align-items: center; justify-content: center; padding: 64px; }
+.spinner {
+  width: 22px; height: 22px;
+  border: 2.5px solid #DDE5F0;
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.65s linear infinite;
+}
+.spinner-sm { width: 15px; height: 15px; border-width: 2px; }
+
+/* ═══════════════════════════════════════════════════════════
+   UTILITIES
+════════════════════════════════════════════════════════════ */
+.row    { display: flex; align-items: center; }
+.col    { display: flex; flex-direction: column; }
+.gap-1  { gap: 4px;  }
+.gap-2  { gap: 8px;  }
+.gap-3  { gap: 12px; }
+.jc-sb  { justify-content: space-between; }
+.jc-end { justify-content: flex-end; }
+.ml-auto{ margin-left: auto; }
+.mt-4   { margin-top: 16px; }
+.mb-4   { margin-bottom: 16px; }
+.fw6    { font-weight: 600; }
+.fs12   { font-size: 12px; }
+.t2     { color: var(--t2); }
+.t3     { color: var(--t3); }
+
+/* ═══════════════════════════════════════════════════════════
+   ANIMATIONS
+════════════════════════════════════════════════════════════ */
+@keyframes spin    { to { transform: rotate(360deg); } }
+@keyframes fadeIn  { from { opacity: 0; }  to { opacity: 1; } }
+@keyframes fadeUp  {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+
+
+
+
+
+Axios client with JWT interceptor and 401 redirect
+client.js
+
+import axios from 'axios'
+
+const client = axios.create({
+  baseURL: 'http://localhost:8000/api',
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 15000,
+})
+
+// Attach JWT to every request
+client.interceptors.request.use(config => {
+  const token = localStorage.getItem('token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+// Auto-logout on 401
+client.interceptors.response.use(
+  res => res,
+  err => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      window.location.hash = '/login'
+    }
+    return Promise.reject(err)
+  }
+)
+
+export default client
+
+
+
+
+
+
+
+Auth context - token and user state management
+AuthContext.jsx
+
+
+import { createContext, useContext, useState } from 'react'
+
+const AuthContext = createContext(null)
+
+export function AuthProvider({ children }) {
+  const [token, setToken] = useState(() => localStorage.getItem('token') || null)
+  const [user, setUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('user')) } catch { return null }
+  })
+
+  const login = (tokenVal, userData) => {
+    setToken(tokenVal)
+    setUser(userData)
+    localStorage.setItem('token', tokenVal)
+    localStorage.setItem('user', JSON.stringify(userData))
+  }
+
+  const logout = () => {
+    setToken(null)
+    setUser(null)
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+  }
+
+  return (
+    <AuthContext.Provider value={{ token, user, login, logout, isAuthenticated: !!token }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export const useAuth = () => useContext(AuthContext)
+
+
+
+
+
+
+TitleBar - custom frameless window controls
+TitleBar.jsx
+
+
+import { Minus, Square, X, Zap } from 'lucide-react'
+
+export default function TitleBar() {
+  const minimize = () => window.electronAPI?.minimize()
+  const maximize = () => window.electronAPI?.maximize()
+  const close    = () => window.electronAPI?.close()
+
+  return (
+    <div className="titlebar">
+      <div className="tb-left">
+        <div className="tb-logo">
+          <Zap size={13} color="#fff" strokeWidth={2.5} />
+        </div>
+        <span className="tb-name">BillingApp</span>
+      </div>
+      <div className="tb-controls">
+        <button className="tb-btn" onClick={minimize} title="Minimize">
+          <Minus size={12} />
+        </button>
+        <button className="tb-btn" onClick={maximize} title="Maximize / Restore">
+          <Square size={10} />
+        </button>
+        <button className="tb-btn tb-close" onClick={close} title="Close">
+          <X size={13} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+
+
+
+
+
+Sidebar with navigation links and user footer
+Sidebar.jsx
+
+
+import { NavLink, useNavigate } from 'react-router-dom'
+import {
+  LayoutDashboard, Users, Package, FileText,
+  CreditCard, BookOpen, BarChart2, LogOut,
+} from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+
+const NAV = [
+  { to: '/',          icon: LayoutDashboard, label: 'Dashboard',  exact: true },
+  { to: '/customers', icon: Users,           label: 'Customers'              },
+  { to: '/products',  icon: Package,         label: 'Products',   soon: true  },
+  { to: '/invoices',  icon: FileText,        label: 'Invoices',   soon: true  },
+  { to: '/payments',  icon: CreditCard,      label: 'Payments',   soon: true  },
+  { to: '/ledger',    icon: BookOpen,        label: 'Ledger',     soon: true  },
+  { to: '/reports',   icon: BarChart2,       label: 'Reports',    soon: true  },
+]
+
+export default function Sidebar() {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  const initials = (user?.full_name || 'U')
+    .split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
+
+  return (
+    <aside className="sidebar">
+      <div className="sb-section-label">Navigation</div>
+
+      <nav className="sb-nav">
+        {NAV.map(({ to, icon: Icon, label, exact, soon }) => (
+          soon ? (
+            <div key={to} className="sb-item" style={{ opacity: 0.45, cursor: 'default' }}>
+              <Icon size={17} className="sb-icon" strokeWidth={1.8} />
+              {label}
+              <span className="sb-coming">Soon</span>
+            </div>
+          ) : (
+            <NavLink
+              key={to}
+              to={to}
+              end={exact}
+              className={({ isActive }) => `sb-item${isActive ? ' active' : ''}`}
+            >
+              <Icon size={17} className="sb-icon" strokeWidth={1.8} />
+              {label}
+            </NavLink>
+          )
+        ))}
+      </nav>
+
+      <div className="sb-footer">
+        <div className="sb-user" onClick={handleLogout} title="Logout">
+          <div className="sb-avatar">{initials}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="sb-user-name">{user?.full_name || 'User'}</div>
+            <div className="sb-user-role">{user?.role || 'Staff'}</div>
+          </div>
+          <LogOut size={13} color="#2D4060" />
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+
+
+
+
+
+Layout wrapper - sidebar + scrollable content area
+Layout.jsx
+
+import { Outlet } from 'react-router-dom'
+import Sidebar from './Sidebar'
+
+export default function Layout() {
+  return (
+    <>
+      <Sidebar />
+      <main className="layout">
+        <div className="page">
+          <Outlet />
+        </div>
+      </main>
+    </>
+  )
+}
+
+
+
+
+Login page - split-panel design with JWT auth
+Login.jsx
+
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+import client from '../api/client'
+
+export default function Login() {
+  const [form, setForm]     = useState({ username: '', password: '' })
+  const [showPwd, setShowPwd] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+  const { login } = useAuth()
+  const navigate  = useNavigate()
+
+  const onChange = e => {
+    setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+    if (error) setError('')
+  }
+
+  const handleSubmit = async e => {
+    e.preventDefault()
+    if (!form.username.trim() || !form.password) {
+      setError('Username and password are required.')
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      const res = await client.post('/auth/login/', form)
+      if (res.data.success) {
+        login(res.data.data.token, res.data.data.user)
+        navigate('/', { replace: true })
+      } else {
+        setError(res.data.message || 'Login failed. Please try again.')
+      }
+    } catch (err) {
+      setError(
+        err.response?.data?.message ||
+        'Unable to connect to server. Make sure the backend is running.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="login-root">
+
+      {/* ── Left: Branding ─────────────────────────── */}
+      <div className="login-brand-panel">
+        <div className="login-brand-logo">
+          <div className="login-brand-icon">
+            <Zap size={22} color="#fff" strokeWidth={2.5} />
+          </div>
+          <div>
+            <div className="login-brand-name">BillingApp</div>
+            <div className="login-brand-tag">Professional Edition</div>
+          </div>
+        </div>
+
+        <div className="login-brand-copy">
+          <div className="login-brand-headline">
+            Smart billing<br />for your business.
+          </div>
+          <div className="login-brand-desc">
+            Manage invoices, customers, payments,<br />
+            and GST reports — all from one place.
+          </div>
+        </div>
+
+        <div className="login-brand-footer">
+          © {new Date().getFullYear()} BillingApp. All rights reserved.
+        </div>
+      </div>
+
+      {/* ── Right: Form ────────────────────────────── */}
+      <div className="login-form-side">
+        <div className="login-form-box">
+          <h2>Welcome back</h2>
+          <div className="login-sub">Sign in to continue to BillingApp</div>
+
+          {error && (
+            <div className="login-err">
+              <AlertCircle size={15} />
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit}>
+            <div className="fgrp">
+              <label className="flabel">Username</label>
+              <input
+                className="finput"
+                name="username"
+                value={form.username}
+                onChange={onChange}
+                placeholder="Enter your username"
+                autoComplete="username"
+                autoFocus
+              />
+            </div>
+
+            <div className="fgrp">
+              <label className="flabel">Password</label>
+              <div className="pw-wrap">
+                <input
+                  className="finput"
+                  type={showPwd ? 'text' : 'password'}
+                  name="password"
+                  value={form.password}
+                  onChange={onChange}
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
+                  style={{ paddingRight: 40 }}
+                />
+                <button
+                  type="button"
+                  className="pw-eye"
+                  onClick={() => setShowPwd(v => !v)}
+                  tabIndex={-1}
+                >
+                  {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={loading}
+              style={{ width: '100%', justifyContent: 'center', padding: '11px', fontSize: 14, marginTop: 8 }}
+            >
+              {loading ? (
+                <>
+                  <span className="spinner spinner-sm" style={{ borderTopColor: '#fff', borderColor: 'rgba(255,255,255,.3)' }} />
+                  Signing in…
+                </>
+              ) : 'Sign In'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+
+
+
+
+Dashboard page - stat cards + recent invoices table
+Dashboard.jsx
+
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  FileText, IndianRupee, CheckCircle2, Clock,
+  ChevronRight, TrendingUp, Plus,
+} from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+import client from '../api/client'
+
+/* ── helpers ─────────────────────────────────────────────── */
+const inr = n =>
+  n == null ? '₹0' : '₹' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
+
+const greeting = () => {
+  const h = new Date().getHours()
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+}
+
+function StatCard({ icon: Icon, bg, color, label, value, sub, delay = 0 }) {
+  return (
+    <div className="stat-card" style={{ animationDelay: `${delay}s` }}>
+      <div className="stat-icon" style={{ background: bg }}>
+        <Icon size={20} color={color} strokeWidth={2} />
+      </div>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
+    </div>
+  )
+}
+
+const statusBadge = s => {
+  if (s === 'PAID')    return <span className="badge badge-green">Paid</span>
+  if (s === 'PARTIAL') return <span className="badge badge-yellow">Partial</span>
+  return <span className="badge badge-red">Pending</span>
+}
+
+/* ── Component ───────────────────────────────────────────── */
+export default function Dashboard() {
+  const { user }    = useAuth()
+  const navigate    = useNavigate()
+  const [stats,    setStats]    = useState(null)
+  const [invoices, setInvoices] = useState([])
+  const [loading,  setLoading]  = useState(true)
+
+  useEffect(() => {
+    Promise.all([
+      client.get('/invoices/dashboard/'),
+      client.get('/invoices/?payment_status=PENDING'),
+    ])
+      .then(([s, inv]) => {
+        if (s.data.success)   setStats(s.data.data)
+        if (inv.data.success) setInvoices((inv.data.data.invoices || []).slice(0, 8))
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <>
+      {/* Header */}
+      <div className="page-hdr">
+        <div>
+          <div className="page-title">
+            {greeting()}, {user?.full_name?.split(' ')[0] || 'there'} 👋
+          </div>
+          <div className="page-sub">Here's a snapshot of this month</div>
+        </div>
+        <div className="page-hdr-actions">
+          <button className="btn btn-primary" onClick={() => navigate('/invoices')}>
+            <Plus size={15} /> New Invoice
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="loading"><div className="spinner" /></div>
+      ) : (
+        <>
+          {/* Stat cards */}
+          <div className="stats-grid">
+            <StatCard
+              icon={FileText}
+              bg="#EFF6FF" color="#3B82F6"
+              label="Total Invoices"
+              value={stats?.total_invoices ?? 0}
+              sub="This month"
+              delay={0.05}
+            />
+            <StatCard
+              icon={IndianRupee}
+              bg="#F0FDF4" color="#10B981"
+              label="Total Billed"
+              value={inr(stats?.total_billed)}
+              sub="This month"
+              delay={0.10}
+            />
+            <StatCard
+              icon={CheckCircle2}
+              bg="#F0FDF4" color="#059669"
+              label="Collected"
+              value={inr(stats?.total_collected)}
+              sub="This month"
+              delay={0.15}
+            />
+            <StatCard
+              icon={Clock}
+              bg="#FFFBEB" color="#F59E0B"
+              label="Outstanding"
+              value={inr(stats?.total_pending)}
+              sub={`${stats?.pending_count ?? 0} invoice(s) pending`}
+              delay={0.20}
+            />
+          </div>
+
+          {/* Recent pending invoices */}
+          <div className="card" style={{ animation: 'fadeUp 0.35s ease 0.25s both' }}>
+            <div className="card-hdr">
+              <span className="card-title">Pending Invoices</span>
+              <button
+                className="btn btn-ghost btn-sm row gap-1"
+                onClick={() => navigate('/invoices')}
+              >
+                View all <ChevronRight size={13} />
+              </button>
+            </div>
+
+            <div className="tbl-wrap">
+              {invoices.length === 0 ? (
+                <div className="empty">
+                  <TrendingUp size={40} className="empty-icon" />
+                  <div className="empty-text">No pending invoices</div>
+                  <div className="empty-sub">All invoices are settled — great job!</div>
+                </div>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Invoice #</th>
+                      <th>Customer</th>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th style={{ textAlign: 'right' }}>Amount</th>
+                      <th style={{ textAlign: 'right' }}>Due</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoices.map(inv => (
+                      <tr key={inv.invoice_id}>
+                        <td>
+                          <span style={{ color: '#3B82F6', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                            {inv.invoice_number}
+                          </span>
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 500 }}>{inv.customer_name}</div>
+                          {inv.customer_mobile && (
+                            <div className="fs12 t3">{inv.customer_mobile}</div>
+                          )}
+                        </td>
+                        <td className="t2">
+                          {new Date(inv.invoice_date).toLocaleDateString('en-IN', {
+                            day: '2-digit', month: 'short', year: 'numeric'
+                          })}
+                        </td>
+                        <td>
+                          <span className={`badge ${inv.invoice_type === 'GST' ? 'badge-blue' : 'badge-yellow'}`}>
+                            {inv.invoice_type}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 500 }}>{inr(inv.grand_total)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: '#EF4444' }}>{inr(inv.due_amount)}</td>
+                        <td>{statusBadge(inv.payment_status)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  )
+}

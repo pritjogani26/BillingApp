@@ -1,0 +1,2402 @@
+================================================================================
+PROJECT CODE EXPORT
+Root Directory: E:\BillingApp\BillingApp
+Generated At : 2026-06-02 22:20:30.705568
+================================================================================
+
+
+--------------------------------------------------------------------------------
+FILE: manage.py
+--------------------------------------------------------------------------------
+
+#!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
+import os
+import sys
+
+
+def main():
+    """Run administrative tasks."""
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'BillingApp.settings')
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError(
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
+        ) from exc
+    execute_from_command_line(sys.argv)
+
+
+if __name__ == '__main__':
+    main()
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\__init__.py
+--------------------------------------------------------------------------------
+
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\admin.py
+--------------------------------------------------------------------------------
+
+from django.contrib import admin
+
+# Register your models here.
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\apps.py
+--------------------------------------------------------------------------------
+
+from django.apps import AppConfig
+
+
+class BillingConfig(AppConfig):
+    name = 'billing'
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\models.py
+--------------------------------------------------------------------------------
+
+from django.db import models
+
+# Create your models here.
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\tests.py
+--------------------------------------------------------------------------------
+
+from django.test import TestCase
+
+# Create your tests here.
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\urls.py
+--------------------------------------------------------------------------------
+
+# billing/urls.py
+
+from django.urls import path
+from billing.views import (
+    auth_view, company_view, customers_view,
+    products_view, invoices_view, payments_view,
+    ledger_view, reports_view
+)
+
+urlpatterns = [
+    # ── auth ────────────────────────────────────────────────────────────────
+    path("auth/health/", auth_view.HealthView.as_view(), name="health"),
+    path("auth/login/",            auth_view.LoginView.as_view(),          name="login"),
+    path("auth/me/", auth_view.MeView.as_view(), name="me"),
+    path("auth/change-password/",  auth_view.ChangePasswordView.as_view(), name="change_password"),
+
+    # ── company ─────────────────────────────────────────────────────────────
+    path('company/profile/',        company_view.CompanyProfileView.as_view(), name='company_profile'),
+    path('company/profile/update/', company_view.CompanyProfileView.as_view(), name='company_update'),
+
+    # ── customers ───────────────────────────────────────────────────────────
+    path('customers/',                           customers_view.CustomerListView.as_view(),           name='customer_list'),
+    path('customers/<int:customer_id>/',         customers_view.CustomerDetailView.as_view(),         name='customer_detail'),
+    path('customers/<int:customer_id>/summary/', customers_view.CustomerLedgerSummaryView.as_view(), name='customer_summary'),
+
+    # ── products ────────────────────────────────────────────────────────────
+    path('products/',                  products_view.ProductListView.as_view(),   name='product_list'),
+    path('products/<int:product_id>/', products_view.ProductDetailView.as_view(), name='product_detail'),
+
+    # ── invoices ─────────────────────────────────────────────────────────────
+    path('invoices/dashboard/',            invoices_view.DashboardStatsView.as_view(),  name='dashboard'),      # ✅ Fixed: moved before <int:>
+    path('invoices/',                      invoices_view.InvoiceListView.as_view(),     name='invoice_list'),
+    path('invoices/<int:invoice_id>/',     invoices_view.InvoiceDetailView.as_view(),   name='invoice_detail'),
+
+    # ── payments ────────────────────────────────────────────────────────────
+    path('payments/',                  payments_view.PaymentListView.as_view(),   name='payment_list'),
+    path('payments/<int:payment_id>/', payments_view.PaymentDetailView.as_view(), name='payment_detail'),
+
+    # ── ledger ──────────────────────────────────────────────────────────────
+    path('ledger/outstanding/',           ledger_view.OutstandingReportView.as_view(), name='outstanding'),
+    path('ledger/<int:customer_id>/',     ledger_view.LedgerEntriesView.as_view(),     name='ledger_entries'),
+
+    # ── reports ─────────────────────────────────────────────────────────────
+    path('reports/gst-summary/',   reports_view.GSTSummaryView.as_view(),   name='gst_summary'),
+    path('reports/gstr1/',         reports_view.GSTR1View.as_view(),          name='gstr1'),
+    path('reports/hsn-summary/',   reports_view.HSNSummaryView.as_view(),    name='hsn_summary'),
+    path('reports/monthly-sales/', reports_view.MonthlySalesView.as_view(),  name='monthly_sales'),
+]
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views.py
+--------------------------------------------------------------------------------
+
+from django.shortcuts import render
+
+# Create your views here.
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\helper\auth.py
+--------------------------------------------------------------------------------
+
+# billing/helper/auth.py
+
+import jwt
+import json
+from functools import wraps
+from datetime import datetime, timedelta, timezone
+
+from django.conf import settings
+from django.http import JsonResponse
+
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.exceptions import AuthenticationFailed
+
+from billing.helper.db import query_one
+
+
+def _secret():
+    return settings.JWT_SECRET
+
+
+def create_token(user_id: int, company_id: int, role: str) -> str:
+    payload = {
+        'user_id':    user_id,
+        'company_id': company_id,
+        'role':       role,
+        'exp': datetime.now(timezone.utc) + timedelta(hours=settings.JWT_EXPIRY_HOURS),
+        'iat': datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, _secret(), algorithm='HS256')
+
+
+def decode_token(token: str) -> dict:
+    return jwt.decode(token, _secret(), algorithms=['HS256'])
+
+
+# ✅ New: DRF-compatible authentication class used by CBVs (e.g. ChangePasswordView)
+class JWTUser:
+    """Lightweight user object attached to request.user by JWTAuthentication."""
+    def __init__(self, payload: dict):
+        self.user_id    = payload['user_id']
+        self.company_id = payload['company_id']
+        self.role       = payload['role']
+        self.is_authenticated = True   # required by IsAuthenticated
+
+
+class JWTAuthentication(BaseAuthentication):
+    def authenticate(self, request):
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if not auth_header.startswith('Bearer '):
+            return None  # Let DRF handle as anonymous
+
+        token = auth_header.split(' ', 1)[1]
+        try:
+            payload = decode_token(token)
+        except jwt.ExpiredSignatureError:
+            raise AuthenticationFailed('Token expired')
+        except jwt.InvalidTokenError:
+            raise AuthenticationFailed('Invalid token')
+
+        user = query_one(
+            "SELECT user_id, company_id, role, status FROM users WHERE user_id = %s",
+            (payload['user_id'],)
+        )
+        if not user or user['status'] != 'A':
+            raise AuthenticationFailed('User inactive or not found')
+
+        return (JWTUser(payload), token)  # (user, auth) tuple required by DRF
+
+
+# ── Decorator for function-based views (me, etc.) ──────────────────────────
+
+def require_auth(view_func):
+    """Decorator — validates Bearer token and injects request.user_payload."""
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if not auth_header.startswith('Bearer '):
+            return JsonResponse({'error': 'Unauthorized'}, status=401)
+        token = auth_header.split(' ', 1)[1]
+        try:
+            payload = decode_token(token)
+        except jwt.ExpiredSignatureError:
+            return JsonResponse({'error': 'Token expired'}, status=401)
+        except jwt.InvalidTokenError:
+            return JsonResponse({'error': 'Invalid token'}, status=401)
+
+        user = query_one(
+            "SELECT user_id, company_id, role, status FROM users WHERE user_id = %s",
+            (payload['user_id'],)
+        )
+        if not user or user['status'] != 'A':
+            return JsonResponse({'error': 'User inactive or not found'}, status=401)
+
+        request.user_payload = payload
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+
+def json_body(request) -> dict:
+    try:
+        return json.loads(request.body)
+    except (json.JSONDecodeError, Exception):
+        return {}
+
+
+--------------------------------------------------------------------------------
+FILE: billing\helper\common_response.py
+--------------------------------------------------------------------------------
+
+from rest_framework.response import Response
+from rest_framework import status
+
+
+class CommonResponse:
+
+    @staticmethod
+    def success(
+        message="Success",
+        data=None,
+        status_code=status.HTTP_200_OK
+    ):
+        return Response(
+            {
+                "success": True,
+                "message": message,
+                "data": data,
+                "errors": None
+            },
+            status=status_code
+        )
+
+    @staticmethod
+    def error(
+        message="Something went wrong",
+        errors=None,
+        status_code=status.HTTP_400_BAD_REQUEST
+    ):
+        return Response(
+            {
+                "success": False,
+                "message": message,
+                "data": None,
+                "errors": errors
+            },
+            status=status_code
+        )
+
+
+--------------------------------------------------------------------------------
+FILE: billing\helper\db.py
+--------------------------------------------------------------------------------
+
+from django.db import connection
+
+
+def _dictfetch(cursor):
+    """Return all rows from cursor as list of dicts."""
+    columns = [col[0] for col in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def query_all(sql: str, params: tuple = ()):
+    """Execute SELECT and return list of dicts."""
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        return _dictfetch(cur)
+
+
+def query_one(sql: str, params: tuple = ()):
+    """Execute SELECT and return single dict or None."""
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        if cur.description is None:
+            return None
+        cols = [col[0] for col in cur.description]
+        row = cur.fetchone()
+        return dict(zip(cols, row)) if row else None
+
+
+def execute(sql: str, params: tuple = ()):
+    """Execute INSERT / UPDATE / DELETE. Returns rowcount."""
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.rowcount
+
+
+def insert_returning(sql: str, params: tuple = ()):
+    """Execute INSERT … RETURNING and return the returned row as dict."""
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        cols = [col[0] for col in cur.description]
+        row  = cur.fetchone()
+        return dict(zip(cols, row)) if row else None
+
+
+--------------------------------------------------------------------------------
+FILE: billing\serializers\auth_serializer.py
+--------------------------------------------------------------------------------
+
+from rest_framework import serializers
+
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField(required=True)
+    password = serializers.CharField(required=True, write_only=True, style={"input_type": "password"})
+
+
+class ChangePasswordSerializer(serializers.Serializer): 
+    old_password = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True)
+
+class MeSerializer(serializers.Serializer):
+    user_id      = serializers.IntegerField()
+    company_id   = serializers.IntegerField()
+    username     = serializers.CharField()
+    full_name    = serializers.CharField()
+    role         = serializers.CharField()
+    company_name = serializers.CharField()
+    gstin        = serializers.CharField()
+
+
+--------------------------------------------------------------------------------
+FILE: billing\serializers\company_serializer.py
+--------------------------------------------------------------------------------
+
+from rest_framework import serializers
+
+
+class CompanyProfileSerializer(serializers.Serializer):
+    company_id     = serializers.IntegerField(required=False)
+    company_name   = serializers.CharField(max_length=255)
+    gstin          = serializers.CharField(max_length=20)
+    pan_number     = serializers.CharField(max_length=20)
+    address        = serializers.CharField()
+    city           = serializers.CharField(max_length=100)
+    state          = serializers.CharField(max_length=100)
+    pincode        = serializers.CharField(max_length=20)
+    phone          = serializers.CharField(max_length=20)
+    email          = serializers.EmailField()
+    bank_name      = serializers.CharField(max_length=255,  required=False, allow_null=True)
+    account_number = serializers.CharField(max_length=100,  required=False, allow_null=True)
+    ifsc_code      = serializers.CharField(max_length=20,   required=False, allow_null=True)
+    logo_path      = serializers.CharField(                 required=False, allow_null=True)
+    invoice_prefix = serializers.CharField(max_length=20,   required=False, allow_null=True)
+    created_at     = serializers.DateTimeField(required=False)
+    updated_at     = serializers.DateTimeField(required=False)
+
+
+--------------------------------------------------------------------------------
+FILE: billing\serializers\customers_serializer.py
+--------------------------------------------------------------------------------
+
+from rest_framework import serializers
+
+
+class CustomerSerializer(serializers.Serializer):
+    customer_id    = serializers.IntegerField(required=False)
+    company_id     = serializers.IntegerField(required=False)
+    company_name   = serializers.CharField(max_length=255)
+    contact_person = serializers.CharField(max_length=255, required=False, allow_null=True, allow_blank=True)
+    gstin          = serializers.CharField(max_length=20,  required=False, allow_null=True, allow_blank=True)
+    pan_number     = serializers.CharField(max_length=20,  required=False, allow_null=True, allow_blank=True)
+    address        = serializers.CharField(                 required=False, allow_null=True, allow_blank=True)
+    city           = serializers.CharField(max_length=100, required=False, allow_null=True, allow_blank=True)
+    state          = serializers.CharField(max_length=100, required=False, allow_null=True, allow_blank=True)
+    pincode        = serializers.CharField(max_length=20,  required=False, allow_null=True, allow_blank=True)
+    mobile         = serializers.CharField(max_length=20,  required=False, allow_null=True, allow_blank=True)
+    email          = serializers.EmailField(               required=False, allow_null=True, allow_blank=True)
+    rate           = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0.00)
+    status         = serializers.CharField(max_length=1,   required=False)
+    created_at     = serializers.DateTimeField(required=False)
+    created_by     = serializers.IntegerField(required=False)
+    updated_at     = serializers.DateTimeField(required=False)
+    updated_by     = serializers.IntegerField(required=False)
+
+
+class CustomerLedgerSummarySerializer(serializers.Serializer):
+    customer_id     = serializers.IntegerField()
+    company_name    = serializers.CharField()
+    total_debit     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_credit    = serializers.DecimalField(max_digits=12, decimal_places=2)
+    current_balance = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\serializers\invoices_serializer.py
+--------------------------------------------------------------------------------
+
+from rest_framework import serializers
+
+
+class InvoiceItemSerializer(serializers.Serializer):
+    item_id         = serializers.IntegerField(required=False)
+    invoice_id      = serializers.IntegerField(required=False)
+    company_id      = serializers.IntegerField(required=False)
+    product_id      = serializers.IntegerField(required=False, allow_null=True)
+    quantity        = serializers.DecimalField(max_digits=12, decimal_places=2, default=1.00)
+    unit_price      = serializers.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    gst_percentage  = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0.00)
+    taxable_amount  = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    cgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    sgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    igst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    total_amount    = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+
+    # Snapshot fields / Joined fields from products table
+    product_name    = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    hsn_code        = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    description     = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    created_at      = serializers.DateTimeField(required=False)
+
+
+class InvoiceSerializer(serializers.Serializer):
+    invoice_id      = serializers.IntegerField(required=False)
+    company_id      = serializers.IntegerField(required=False)
+    customer_id     = serializers.IntegerField(required=True)
+    invoice_number  = serializers.CharField(max_length=100, required=False)
+    invoice_type    = serializers.CharField(max_length=20, required=False, default='GST')
+    invoice_date    = serializers.DateField(required=True)
+    subtotal        = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    cgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    sgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    igst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    discount_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0.00)
+    round_off       = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    grand_total     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    due_amount      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    payment_status  = serializers.CharField(max_length=20, required=False)
+    notes           = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    created_at      = serializers.DateTimeField(required=False)
+    created_by      = serializers.IntegerField(required=False)
+    updated_at      = serializers.DateTimeField(required=False)
+    updated_by      = serializers.IntegerField(required=False)
+
+    # Joined fields from customers table
+    customer_name    = serializers.CharField(required=False, allow_null=True)
+    customer_mobile  = serializers.CharField(required=False, allow_null=True)
+    contact_person   = serializers.CharField(required=False, allow_null=True)
+    customer_address = serializers.CharField(required=False, allow_null=True)
+    customer_city    = serializers.CharField(required=False, allow_null=True)
+    customer_state   = serializers.CharField(required=False, allow_null=True)
+    customer_gstin   = serializers.CharField(required=False, allow_null=True)
+    customer_email   = serializers.CharField(required=False, allow_null=True)
+
+    # Nested items list
+    items           = InvoiceItemSerializer(many=True, required=False)
+
+
+
+class DashboardStatsSerializer(serializers.Serializer):
+    total_invoices   = serializers.IntegerField()
+    total_billed     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_pending    = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_collected  = serializers.DecimalField(max_digits=12, decimal_places=2)
+    pending_count    = serializers.IntegerField()
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\serializers\ledger_serializer.py
+--------------------------------------------------------------------------------
+
+from rest_framework import serializers
+
+
+class LedgerEntrySerializer(serializers.Serializer):
+    entry_id                  = serializers.IntegerField(required=False)
+    company_id                = serializers.IntegerField(required=False)
+    customer_id               = serializers.IntegerField(required=False)
+    transaction_type          = serializers.CharField(max_length=20)
+    reference_type            = serializers.CharField(max_length=50)
+    reference_id              = serializers.IntegerField()
+    transaction_date          = serializers.DateField()
+    debit_amount              = serializers.DecimalField(max_digits=12, decimal_places=2)
+    credit_amount             = serializers.DecimalField(max_digits=12, decimal_places=2)
+    balance_after_transaction = serializers.DecimalField(max_digits=12, decimal_places=2)
+    remarks                   = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    created_at                = serializers.DateTimeField(required=False)
+
+
+class OutstandingReportSerializer(serializers.Serializer):
+    customer_id      = serializers.IntegerField()
+    company_name     = serializers.CharField()
+    mobile           = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    outstanding      = serializers.DecimalField(max_digits=12, decimal_places=2)
+    pending_invoices = serializers.IntegerField()
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\serializers\payments_serializer.py
+--------------------------------------------------------------------------------
+
+from rest_framework import serializers
+
+
+class PaymentSerializer(serializers.Serializer):
+    payment_id       = serializers.IntegerField(required=False)
+    invoice_id       = serializers.IntegerField(required=True)
+    company_id       = serializers.IntegerField(required=False)
+    customer_id      = serializers.IntegerField(required=False)
+    payment_date     = serializers.DateField(required=True)
+    payment_method   = serializers.CharField(max_length=50, required=False, default='CASH')
+    reference_number = serializers.CharField(max_length=255, required=False, allow_null=True, allow_blank=True)
+    amount           = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+    notes            = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    created_at       = serializers.DateTimeField(required=False)
+    created_by       = serializers.IntegerField(required=False)
+    updated_by       = serializers.IntegerField(required=False)
+    updated_at       = serializers.DateTimeField(required=False)
+
+    # Joined fields from other tables
+    invoice_number   = serializers.CharField(required=False, allow_null=True)
+    customer_name    = serializers.CharField(required=False, allow_null=True)
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\serializers\products_serializer.py
+--------------------------------------------------------------------------------
+
+from rest_framework import serializers
+
+
+class ProductSerializer(serializers.Serializer):
+    product_id     = serializers.IntegerField(required=False)
+    company_id     = serializers.IntegerField(required=False)
+    customer_id    = serializers.IntegerField(required=False, allow_null=True)
+    product_name   = serializers.CharField(max_length=255)
+    hsn_code       = serializers.CharField(max_length=20,  required=False, allow_null=True, allow_blank=True)
+    gst_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=18.00)
+    height         = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0.00)
+    width          = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, default=0.00)
+    price          = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0.00)
+    description    = serializers.CharField(                 required=False, allow_null=True, allow_blank=True)
+    status         = serializers.CharField(max_length=1,   required=False)
+    created_at     = serializers.DateTimeField(required=False)
+    created_by     = serializers.IntegerField(required=False)
+    updated_at     = serializers.DateTimeField(required=False)
+    updated_by     = serializers.IntegerField(required=False)
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\serializers\reports_serializer.py
+--------------------------------------------------------------------------------
+
+from rest_framework import serializers
+
+
+class GSTSummarySerializer(serializers.Serializer):
+    invoice_count  = serializers.IntegerField()
+    taxable_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_cgst     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_sgst     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_igst     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    grand_total    = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class GSTR1Serializer(serializers.Serializer):
+    invoice_number  = serializers.CharField()
+    invoice_date    = serializers.DateField()
+    company_name    = serializers.CharField()
+    customer_gstin  = serializers.CharField(required=False, allow_null=True)
+    customer_state  = serializers.CharField(required=False, allow_null=True)
+    taxable_value   = serializers.DecimalField(max_digits=12, decimal_places=2)
+    cgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    sgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    igst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    grand_total     = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class HSNSummarySerializer(serializers.Serializer):
+    hsn_code       = serializers.CharField(required=False, allow_null=True)
+    product_name   = serializers.CharField()
+    total_qty      = serializers.DecimalField(max_digits=12, decimal_places=2)
+    taxable_value  = serializers.DecimalField(max_digits=12, decimal_places=2)
+    cgst           = serializers.DecimalField(max_digits=12, decimal_places=2)
+    sgst           = serializers.DecimalField(max_digits=12, decimal_places=2)
+    igst           = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total          = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class MonthlySalesSerializer(serializers.Serializer):
+    month_label   = serializers.CharField()
+    yr            = serializers.IntegerField()
+    mo            = serializers.IntegerField()
+    total_sales   = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_tax     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    invoice_count = serializers.IntegerField()
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views\__init__.py
+--------------------------------------------------------------------------------
+
+
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views\auth_view.py
+--------------------------------------------------------------------------------
+
+# billing/views/auth_view.py
+
+import hashlib
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from django.http import HttpRequest
+from django.contrib.auth.hashers import make_password, check_password
+from rest_framework import generics, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
+
+from billing.serializers.auth_serializer import LoginSerializer, ChangePasswordSerializer, MeSerializer
+from billing.helper.db import query_one, execute
+from billing.helper.auth import create_token, require_auth, JWTAuthentication
+from billing.helper.common_response import CommonResponse
+
+
+class HealthView(generics.GenericAPIView):
+    authentication_classes = []
+    permission_classes     = [AllowAny]
+
+    def get(self, request):
+        return CommonResponse.success(
+            message="Server is healthy",
+            data={'status': 'ok'}
+        )
+
+
+class LoginView(generics.GenericAPIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    serializer_class = LoginSerializer
+
+    def post(self, request: HttpRequest):
+        data = self.get_serializer(data=request.data)
+        if not data.is_valid():
+            return CommonResponse.error(message="Invalid input", status_code=status.HTTP_400_BAD_REQUEST)
+
+        username = data.validated_data.get('username', '').strip()
+        password = data.validated_data.get('password', '')
+
+        if not username or not password:
+            return CommonResponse.error(message="Username and password required", status_code=status.HTTP_400_BAD_REQUEST)
+
+        user = query_one(
+            """
+            SELECT u.user_id, u.company_id, u.username, u.full_name,
+                r.role AS role, u.status, u.password
+            FROM   users u
+            LEFT JOIN roles r ON r.role_id = u.role
+            WHERE  u.username = %s
+            """,
+            (username,)
+        )
+
+        if not user or user['status'] != 'A':
+            return CommonResponse.error(message="Invalid credentials", status_code=status.HTTP_401_UNAUTHORIZED)
+
+        if not check_password(password, user['password']):
+            return CommonResponse.error(message="Invalid credentials", status_code=status.HTTP_401_UNAUTHORIZED)
+
+        token = create_token(user['user_id'], user['company_id'], user['role'])
+
+        return CommonResponse.success(
+            message="Login successful",
+            data={
+                'token': token,
+                'user': {
+                    'user_id':    user['user_id'],
+                    'company_id': user['company_id'],
+                    'username':   user['username'],
+                    'full_name':  user['full_name'],
+                    'role':       user['role'],
+                }
+            }
+        )
+
+
+class ChangePasswordView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = ChangePasswordSerializer
+
+    def post(self, request: HttpRequest):
+        data = self.get_serializer(data=request.data)
+        if not data.is_valid():
+            return CommonResponse.error(
+                message="Invalid input",
+                errors=data.errors,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        old_password = data.validated_data.get('old_password', '')
+        new_password = data.validated_data.get('new_password', '')
+
+        user_id = request.user.user_id
+
+        if not old_password or not new_password:
+            return CommonResponse.error(
+                message="Both passwords are required",
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = query_one(
+            "SELECT password FROM users WHERE user_id = %s",
+            (user_id,)
+        )
+
+        if not user:
+            return CommonResponse.error(message="User not found", status_code=status.HTTP_404_NOT_FOUND)
+
+        if not check_password(old_password, user['password']):
+            return CommonResponse.error(message="Old password incorrect", status_code=status.HTTP_400_BAD_REQUEST)
+
+        execute(
+            """
+            UPDATE users
+            SET password = %s, updated_at = NOW(), updated_by = %s
+            WHERE user_id = %s
+            """,
+            (make_password(new_password), user_id, user_id)
+        )
+
+        return CommonResponse.success(message="Password updated successfully")
+
+class MeView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = MeSerializer
+
+    def get(self, request):
+        user = query_one(
+            """
+            SELECT u.user_id, u.company_id, u.username, u.full_name, r.role AS role,
+                   c.company_name, c.gstin
+            FROM   users u
+            JOIN   company_profile c ON c.company_id = u.company_id
+            LEFT JOIN roles r ON r.role_id = u.role
+            WHERE  u.user_id = %s
+            """,
+            (request.user.user_id,)
+        )
+
+        if not user:
+            return CommonResponse.error(
+                message="User not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = self.get_serializer(data=user)
+        serializer.is_valid(raise_exception=True)
+
+        return CommonResponse.success(
+            message="User fetched successfully",
+            data=serializer.validated_data
+        )
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views\company_view.py
+--------------------------------------------------------------------------------
+
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
+
+from billing.helper.db              import query_one, execute
+from billing.helper.auth            import JWTAuthentication
+from billing.helper.common_response import CommonResponse
+from billing.serializers.company_serializer import CompanyProfileSerializer
+
+
+class CompanyProfileView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = CompanyProfileSerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+
+        row = query_one(
+            """
+            SELECT company_id, company_name, gstin, pan_number, address,
+                   city, state, pincode, phone, email,
+                   bank_name, account_number, ifsc_code,
+                   logo_path, invoice_prefix,
+                   created_at, updated_at
+            FROM   company_profile
+            WHERE  company_id = %s
+            """,
+            (company_id,)
+        )
+
+        if not row:
+            return CommonResponse.error(
+                message="Company not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = self.get_serializer(data=row)
+        serializer.is_valid(raise_exception=True)
+
+        return CommonResponse.success(
+            message="Company profile fetched successfully",
+            data=serializer.validated_data
+        )
+
+    def put(self, request):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return CommonResponse.error(
+                message="Invalid input",
+                errors=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        d = serializer.validated_data
+
+        rows_updated = execute(
+            """
+            UPDATE company_profile
+            SET    company_name   = %s,
+                   gstin          = %s,
+                   pan_number     = %s,
+                   address        = %s,
+                   city           = %s,
+                   state          = %s,
+                   pincode        = %s,
+                   phone          = %s,
+                   email          = %s,
+                   bank_name      = %s,
+                   account_number = %s,
+                   ifsc_code      = %s,
+                   invoice_prefix = %s,
+                   updated_at     = NOW(),
+                   updated_by     = %s
+            WHERE  company_id = %s
+            """,
+            (
+                d.get('company_name'), d.get('gstin'),
+                d.get('pan_number'),   d.get('address'),
+                d.get('city'),         d.get('state'),
+                d.get('pincode'),      d.get('phone'),
+                d.get('email'),        d.get('bank_name'),
+                d.get('account_number'), d.get('ifsc_code'),
+                d.get('invoice_prefix'),
+                user_id, company_id,
+            )
+        )
+
+        if rows_updated == 0:
+            return CommonResponse.error(
+                message="Company not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        return CommonResponse.success(message="Profile updated successfully")
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views\customers_view.py
+--------------------------------------------------------------------------------
+
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
+
+from billing.helper.db import query_all, query_one, insert_returning, execute
+from billing.helper.auth import JWTAuthentication
+from billing.helper.common_response import CommonResponse
+from billing.serializers.customers_serializer import CustomerSerializer, CustomerLedgerSummarySerializer
+
+
+class CustomerListView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = CustomerSerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+        search = request.query_params.get('search', '')
+        rows = query_all(
+            """
+            SELECT customer_id, company_id, company_name, contact_person,
+                   gstin, pan_number, address, city, state,
+                   pincode, mobile, email, rate, status,
+                   created_at, created_by, updated_at, updated_by
+            FROM   customers
+            WHERE  company_id = %s
+              AND  status != 'D'
+              AND  (company_name ILIKE %s OR mobile ILIKE %s OR gstin ILIKE %s)
+            ORDER  BY company_name
+            """,
+            (company_id, f'%{search}%', f'%{search}%', f'%{search}%')
+        )
+        serializer = self.get_serializer(data=rows, many=True)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Customers fetched successfully",
+            data={
+                'customers': serializer.validated_data,
+                'count': len(serializer.validated_data)
+            }
+        )
+
+    def post(self, request):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return CommonResponse.error(
+                message="Invalid input",
+                errors=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        d = serializer.validated_data
+        row = insert_returning(
+            """
+            INSERT INTO customers
+                (company_id, company_name, contact_person, gstin, pan_number,
+                 address, city, state, pincode, mobile, email, rate,
+                 status, created_at, created_by, updated_at, updated_by)
+            VALUES
+                (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'A',NOW(),%s,NOW(),%s)
+            RETURNING customer_id, company_id, company_name, contact_person, gstin, pan_number,
+                      address, city, state, pincode, mobile, email, rate, status,
+                      created_at, created_by, updated_at, updated_by
+            """,
+            (
+                company_id,
+                d.get('company_name'), d.get('contact_person'),
+                d.get('gstin'),        d.get('pan_number'),
+                d.get('address'),      d.get('city'),
+                d.get('state'),        d.get('pincode'),
+                d.get('mobile'),       d.get('email'),
+                d.get('rate', 0.00),
+                user_id, user_id,
+            )
+        )
+        
+        out_serializer = self.get_serializer(data=row)
+        out_serializer.is_valid(raise_exception=True)
+        
+        return CommonResponse.success(
+            message="Customer created successfully",
+            data=out_serializer.validated_data,
+            status_code=status.HTTP_201_CREATED
+        )
+
+
+class CustomerDetailView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = CustomerSerializer
+
+    def get(self, request, customer_id):
+        company_id = request.user.company_id
+        row = query_one(
+            """
+            SELECT customer_id, company_id, company_name, contact_person, gstin, pan_number,
+                   address, city, state, pincode, mobile, email, rate, status,
+                   created_at, created_by, updated_at, updated_by
+            FROM   customers
+            WHERE  customer_id = %s AND company_id = %s AND status != 'D'
+            """,
+            (customer_id, company_id)
+        )
+        if not row:
+            return CommonResponse.error(
+                message="Customer not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+        serializer = self.get_serializer(data=row)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Customer fetched successfully",
+            data=serializer.validated_data
+        )
+
+    def put(self, request, customer_id):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return CommonResponse.error(
+                message="Invalid input",
+                errors=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        d = serializer.validated_data
+        rows_updated = execute(
+            """
+            UPDATE customers SET
+                company_name   = %s, contact_person = %s,
+                gstin          = %s, pan_number     = %s,
+                address        = %s, city           = %s,
+                state          = %s, pincode        = %s,
+                mobile         = %s, email          = %s,
+                rate           = %s, updated_at     = NOW(),
+                updated_by     = %s
+            WHERE customer_id = %s AND company_id = %s AND status != 'D'
+            """,
+            (
+                d.get('company_name'), d.get('contact_person'),
+                d.get('gstin'),        d.get('pan_number'),
+                d.get('address'),      d.get('city'),
+                d.get('state'),        d.get('pincode'),
+                d.get('mobile'),       d.get('email'),
+                d.get('rate', 0.00),
+                user_id, customer_id, company_id,
+            )
+        )
+        if rows_updated == 0:
+            return CommonResponse.error(
+                message="Customer not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+        return CommonResponse.success(message="Customer updated successfully")
+
+    def delete(self, request, customer_id):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        rows_updated = execute(
+            """
+            UPDATE customers
+            SET status = 'D', updated_at = NOW(), updated_by = %s
+            WHERE customer_id = %s AND company_id = %s AND status != 'D'
+            """,
+            (user_id, customer_id, company_id)
+        )
+        if rows_updated == 0:
+            return CommonResponse.error(
+                message="Customer not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+        return CommonResponse.success(message="Customer deleted successfully")
+
+
+class CustomerLedgerSummaryView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = CustomerLedgerSummarySerializer
+
+    def get(self, request, customer_id):
+        company_id = request.user.company_id
+        row = query_one(
+            """
+            SELECT
+                c.customer_id, c.company_name,
+                COALESCE(SUM(le.debit_amount),  0) AS total_debit,
+                COALESCE(SUM(le.credit_amount), 0) AS total_credit,
+                COALESCE((
+                    SELECT balance_after_transaction
+                    FROM   ledger_entries
+                    WHERE  customer_id = c.customer_id AND company_id = %s
+                    ORDER  BY entry_id DESC
+                    LIMIT  1
+                ), 0) AS current_balance
+            FROM   customers c
+            LEFT   JOIN ledger_entries le
+                   ON le.customer_id = c.customer_id AND le.company_id = %s
+            WHERE  c.customer_id = %s AND c.company_id = %s AND c.status != 'D'
+            GROUP  BY c.customer_id, c.company_name
+            """,
+            (company_id, company_id, customer_id, company_id)
+        )
+        if not row:
+            return CommonResponse.error(
+                message="Customer not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+        serializer = self.get_serializer(data=row)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Customer ledger summary fetched successfully",
+            data=serializer.validated_data
+        )
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views\invoices_view.py
+--------------------------------------------------------------------------------
+
+from decimal import Decimal
+import datetime
+from django.db import transaction
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
+
+from billing.helper.db import query_all, query_one, insert_returning, execute
+from billing.helper.auth import JWTAuthentication
+from billing.helper.common_response import CommonResponse
+from billing.serializers.invoices_serializer import (
+    InvoiceSerializer,
+    DashboardStatsSerializer
+)
+
+
+def _next_invoice_number(company_id: int, prefix: str) -> str:
+    row = query_one(
+        """
+        SELECT COUNT(*) AS cnt FROM invoices WHERE company_id = %s
+        """,
+        (company_id,)
+    )
+    seq = (row['cnt'] or 0) + 1
+    yr = datetime.date.today().year % 100
+    return f"{prefix}-{yr:02d}-{seq:04d}"
+
+
+def _post_ledger(company_id, customer_id, ref_type, ref_id, date,
+                 debit, credit, remarks, user_id):
+    """Compute running balance and insert ledger entry."""
+    last = query_one(
+        """
+        SELECT balance_after_transaction FROM ledger_entries
+        WHERE  company_id = %s AND customer_id = %s
+        ORDER  BY entry_id DESC LIMIT 1
+        """,
+        (company_id, customer_id)
+    )
+    prev_balance = Decimal(str(last['balance_after_transaction'])) if last else Decimal('0.00')
+    new_balance  = prev_balance + Decimal(str(debit)) - Decimal(str(credit))
+
+    insert_returning(
+        """
+        INSERT INTO ledger_entries
+            (company_id, customer_id, transaction_type, reference_type,
+             reference_id, transaction_date, debit_amount, credit_amount,
+             balance_after_transaction, remarks, created_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+        RETURNING entry_id
+        """,
+        (
+            company_id, customer_id,
+            'DEBIT' if debit > 0 else 'CREDIT',
+            ref_type, ref_id, date,
+            debit, credit, new_balance, remarks,
+        )
+    )
+
+
+class InvoiceListView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = InvoiceSerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+
+        customer_id    = request.query_params.get('customer_id')
+        payment_status = request.query_params.get('payment_status')
+        invoice_type   = request.query_params.get('invoice_type')
+        from_date      = request.query_params.get('from_date')
+        to_date        = request.query_params.get('to_date')
+
+        where  = ["i.company_id = %s", "1=1"]
+        params = [company_id]
+
+        if customer_id:
+            where.append("i.customer_id = %s");    params.append(customer_id)
+        if payment_status:
+            where.append("i.payment_status = %s"); params.append(payment_status)
+        if invoice_type:
+            where.append("i.invoice_type = %s");   params.append(invoice_type)
+        if from_date:
+            where.append("i.invoice_date >= %s");  params.append(from_date)
+        if to_date:
+            where.append("i.invoice_date <= %s");  params.append(to_date)
+
+        rows = query_all(
+            f"""
+            SELECT i.invoice_id, i.company_id, i.customer_id, i.invoice_number,
+                   i.invoice_type, i.invoice_date, i.subtotal, i.cgst_amount,
+                   i.sgst_amount, i.igst_amount, i.discount_amount, i.round_off,
+                   i.grand_total, i.due_amount, i.payment_status, i.notes,
+                   i.created_at, i.created_by, i.updated_at, i.updated_by,
+                   c.company_name AS customer_name,
+                   c.mobile       AS customer_mobile
+            FROM   invoices i
+            JOIN   customers c ON c.customer_id = i.customer_id
+            WHERE  {' AND '.join(where)}
+            ORDER  BY i.invoice_date DESC, i.invoice_id DESC
+            """,
+            tuple(params)
+        )
+        serializer = self.get_serializer(data=rows, many=True)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Invoices fetched successfully",
+            data={
+                'invoices': serializer.validated_data,
+                'count': len(serializer.validated_data)
+            }
+        )
+
+    def post(self, request):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return CommonResponse.error(
+                message="Invalid input",
+                errors=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        d = serializer.validated_data
+        items = request.data.get('items', [])
+
+        if not items:
+            return CommonResponse.error(
+                message="Invoice must have at least one item",
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        company = query_one(
+            "SELECT invoice_prefix FROM company_profile WHERE company_id = %s",
+            (company_id,)
+        )
+        prefix = (company or {}).get('invoice_prefix', 'INV')
+
+        try:
+            with transaction.atomic():
+                invoice_number = _next_invoice_number(company_id, prefix)
+                invoice_type   = d.get('invoice_type', 'GST')
+                is_gst         = invoice_type == 'GST'
+
+                subtotal         = Decimal('0.00')
+                total_cgst       = Decimal('0.00')
+                total_sgst       = Decimal('0.00')
+                total_igst       = Decimal('0.00')
+                discount_amount  = Decimal(str(d.get('discount_amount', 0)))
+
+                # Validate customer
+                customer = query_one(
+                    "SELECT customer_id, state FROM customers WHERE customer_id = %s AND company_id = %s AND status != 'D'",
+                    (d.get('customer_id'), company_id)
+                )
+                if not customer:
+                    return CommonResponse.error(
+                        message="Customer not found or is inactive",
+                        status_code=status.HTTP_400_BAD_REQUEST
+                    )
+
+                company_state = query_one(
+                    "SELECT state FROM company_profile WHERE company_id = %s", (company_id,)
+                )
+                is_interstate = (customer.get('state', '').lower() !=
+                                 (company_state or {}).get('state', '').lower())
+
+                computed_items = []
+                for item in items:
+                    qty        = Decimal(str(item.get('quantity', 1.00)))
+                    unit_price = Decimal(str(item.get('unit_price', 0.00)))
+                    gst_pct    = Decimal(str(item.get('gst_percentage', 0.00))) if is_gst else Decimal('0.00')
+                    taxable    = qty * unit_price
+                    half_gst   = gst_pct / 2
+
+                    if is_gst and is_interstate:
+                        igst = (taxable * gst_pct / 100).quantize(Decimal('0.01'))
+                        cgst = sgst = Decimal('0.00')
+                    elif is_gst:
+                        cgst = (taxable * half_gst / 100).quantize(Decimal('0.01'))
+                        sgst = (taxable * half_gst / 100).quantize(Decimal('0.01'))
+                        igst = Decimal('0.00')
+                    else:
+                        cgst = sgst = igst = Decimal('0.00')
+
+                    line_total = taxable + cgst + sgst + igst
+                    subtotal   += taxable
+                    total_cgst += cgst
+                    total_sgst += sgst
+                    total_igst += igst
+
+                    prod_name = item.get('product_name')
+                    if not prod_name and item.get('product_id'):
+                        prod_row = query_one("SELECT product_name FROM products WHERE product_id = %s", (item.get('product_id'),))
+                        prod_name = prod_row['product_name'] if prod_row else ''
+
+                    computed_items.append({
+                        'product_id':     item.get('product_id') if item.get('product_id') else None,
+                        'product_name':   prod_name,
+                        'quantity':       qty,
+                        'unit_price':     unit_price,
+                        'gst_percentage': gst_pct,
+                        'taxable_amount': taxable,
+                        'cgst_amount':    cgst,
+                        'sgst_amount':    sgst,
+                        'igst_amount':    igst,
+                        'total_amount':   line_total,
+                    })
+
+                grand_total = (subtotal + total_cgst + total_sgst + total_igst
+                               - discount_amount)
+                rounded     = round(grand_total)
+                round_off   = Decimal(str(rounded)) - grand_total
+                grand_total = grand_total + round_off
+
+                invoice = insert_returning(
+                    """
+                    INSERT INTO invoices
+                        (company_id, customer_id, invoice_number, invoice_type,
+                         invoice_date, subtotal, cgst_amount, sgst_amount,
+                         igst_amount, discount_amount, round_off,
+                         grand_total, due_amount, payment_status,
+                         notes, created_at, created_by, updated_at, updated_by)
+                    VALUES
+                        (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'PENDING',%s,NOW(),%s,NOW(),%s)
+                    RETURNING *
+                    """,
+                    (
+                        company_id, d.get('customer_id'), invoice_number,
+                        invoice_type, d.get('invoice_date'),
+                        subtotal, total_cgst, total_sgst, total_igst,
+                        discount_amount, round_off, grand_total, grand_total,
+                        d.get('notes', ''), user_id, user_id,
+                    )
+                )
+                invoice_id = invoice['invoice_id']
+
+                for ci in computed_items:
+                    insert_returning(
+                        """
+                        INSERT INTO invoice_items
+                            (invoice_id, company_id, product_id, product_name, quantity,
+                             unit_price, gst_percentage, taxable_amount,
+                             cgst_amount, sgst_amount, igst_amount, total_amount, status, created_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'A',NOW())
+                        RETURNING item_id
+                        """,
+                        (
+                            invoice_id, company_id, ci['product_id'],
+                            ci['product_name'],    ci['quantity'],
+                            ci['unit_price'],       ci['gst_percentage'],
+                            ci['taxable_amount'],   ci['cgst_amount'],
+                            ci['sgst_amount'],      ci['igst_amount'],
+                            ci['total_amount'],
+                        )
+                    )
+
+                _post_ledger(
+                    company_id, d.get('customer_id'),
+                    'INVOICE', invoice_id,
+                    d.get('invoice_date'),
+                    grand_total, Decimal('0.00'),
+                    f"Invoice {invoice_number} raised",
+                    user_id,
+                )
+        except Exception as e:
+            return CommonResponse.error(
+                message=f"Failed to create invoice: {str(e)}",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Retrieve full customer info to serialize back nicely
+        full_inv = query_one(
+            """
+            SELECT i.*,
+                   c.company_name AS customer_name,
+                   c.mobile       AS customer_mobile
+            FROM   invoices i
+            JOIN   customers c ON c.customer_id = i.customer_id
+            WHERE  i.invoice_id = %s
+            """,
+            (invoice_id,)
+        )
+
+        out_serializer = self.get_serializer(data=full_inv)
+        out_serializer.is_valid(raise_exception=True)
+
+        return CommonResponse.success(
+            message="Invoice created successfully",
+            data=out_serializer.validated_data,
+            status_code=status.HTTP_201_CREATED
+        )
+
+
+class InvoiceDetailView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = InvoiceSerializer
+
+    def get(self, request, invoice_id):
+        company_id = request.user.company_id
+
+        inv = query_one(
+            """
+            SELECT i.*,
+                   c.company_name AS customer_name,
+                   c.contact_person, c.address AS customer_address,
+                   c.city AS customer_city, c.state AS customer_state,
+                   c.gstin AS customer_gstin, c.mobile AS customer_mobile,
+                   c.email AS customer_email
+            FROM   invoices i
+            JOIN   customers c ON c.customer_id = i.customer_id
+            WHERE  i.invoice_id = %s AND i.company_id = %s
+            """,
+            (invoice_id, company_id)
+        )
+        if not inv:
+            return CommonResponse.error(
+                message="Invoice not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        items = query_all(
+            """
+            SELECT ii.*, p.hsn_code, p.description
+            FROM   invoice_items ii
+            LEFT   JOIN products p ON p.product_id = ii.product_id
+            WHERE  ii.invoice_id = %s
+            ORDER  BY ii.item_id
+            """,
+            (invoice_id,)
+        )
+        inv['items'] = items
+
+        serializer = self.get_serializer(data=inv)
+        serializer.is_valid(raise_exception=True)
+
+        return CommonResponse.success(
+            message="Invoice details fetched successfully",
+            data=serializer.validated_data
+        )
+
+
+class DashboardStatsView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = DashboardStatsSerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+        stats = query_one(
+            """
+            SELECT
+                COUNT(*)::int                                        AS total_invoices,
+                COALESCE(SUM(grand_total), 0.00)                     AS total_billed,
+                COALESCE(SUM(CASE WHEN payment_status = 'PENDING'
+                                  THEN due_amount END), 0.00)        AS total_pending,
+                COALESCE(SUM(grand_total - due_amount), 0.00)        AS total_collected,
+                COUNT(CASE WHEN payment_status = 'PENDING' THEN 1 END)::int AS pending_count
+            FROM   invoices
+            WHERE  company_id = %s
+              AND  invoice_date >= date_trunc('month', CURRENT_DATE)
+            """,
+            (company_id,)
+        )
+        serializer = self.get_serializer(data=stats)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Dashboard stats fetched successfully",
+            data=serializer.validated_data
+        )
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views\ledger_view.py
+--------------------------------------------------------------------------------
+
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
+
+from billing.helper.db import query_all, query_one
+from billing.helper.auth import JWTAuthentication
+from billing.helper.common_response import CommonResponse
+from billing.serializers.ledger_serializer import LedgerEntrySerializer, OutstandingReportSerializer
+from billing.serializers.customers_serializer import CustomerSerializer
+
+
+class LedgerEntriesView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = LedgerEntrySerializer
+
+    def get(self, request, customer_id):
+        company_id = request.user.company_id
+        from_date  = request.query_params.get('from_date')
+        to_date    = request.query_params.get('to_date')
+
+        where  = ["le.company_id = %s", "le.customer_id = %s"]
+        params = [company_id, customer_id]
+
+        if from_date:
+            where.append("le.transaction_date >= %s"); params.append(from_date)
+        if to_date:
+            where.append("le.transaction_date <= %s"); params.append(to_date)
+
+        customer = query_one(
+            """
+            SELECT customer_id, company_id, company_name, contact_person,
+                   gstin, pan_number, address, city, state,
+                   pincode, mobile, email, rate, status,
+                   created_at, created_by, updated_at, updated_by
+            FROM   customers WHERE customer_id = %s AND company_id = %s AND status != 'D'
+            """,
+            (customer_id, company_id)
+        )
+        if not customer:
+            return CommonResponse.error(
+                message="Customer not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        entries = query_all(
+            f"""
+            SELECT le.entry_id, le.company_id, le.customer_id, le.transaction_type,
+                   le.reference_type, le.reference_id, le.transaction_date,
+                   le.debit_amount, le.credit_amount, le.balance_after_transaction,
+                   le.remarks, le.created_at
+            FROM   ledger_entries le
+            WHERE  {' AND '.join(where)}
+            ORDER  BY le.transaction_date ASC, le.entry_id ASC
+            """,
+            tuple(params)
+        )
+
+        customer_serializer = CustomerSerializer(data=customer)
+        customer_serializer.is_valid(raise_exception=True)
+
+        entries_serializer = self.get_serializer(data=entries, many=True)
+        entries_serializer.is_valid(raise_exception=True)
+
+        return CommonResponse.success(
+            message="Ledger entries fetched successfully",
+            data={
+                'customer':        customer_serializer.validated_data,
+                'entries':         entries_serializer.validated_data,
+                'opening_balance': 0.00,
+            }
+        )
+
+
+class OutstandingReportView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = OutstandingReportSerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+        rows = query_all(
+            """
+            SELECT c.customer_id, c.company_name, c.mobile,
+                   COALESCE(SUM(i.due_amount), 0.00)   AS outstanding,
+                   COUNT(CASE WHEN i.payment_status = 'PENDING'
+                              THEN 1 END)::int          AS pending_invoices
+            FROM   customers c
+            LEFT   JOIN invoices i
+                   ON  i.customer_id = c.customer_id
+                   AND i.company_id  = %s
+                   AND i.payment_status IN ('PENDING','PARTIAL')
+            WHERE  c.company_id = %s AND c.status = 'A'
+            GROUP  BY c.customer_id, c.company_name, c.mobile
+            HAVING COALESCE(SUM(i.due_amount), 0.00) > 0
+            ORDER  BY outstanding DESC
+            """,
+            (company_id, company_id)
+        )
+        serializer = self.get_serializer(data=rows, many=True)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Outstanding report fetched successfully",
+            data={
+                'outstanding': serializer.validated_data,
+                'count': len(serializer.validated_data)
+            }
+        )
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views\payments_view.py
+--------------------------------------------------------------------------------
+
+from decimal import Decimal
+from django.db import transaction
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
+
+from billing.helper.db import query_all, query_one, insert_returning, execute
+from billing.helper.auth import JWTAuthentication
+from billing.helper.common_response import CommonResponse
+from billing.serializers.payments_serializer import PaymentSerializer
+
+
+def _post_ledger(company_id, customer_id, ref_type, ref_id, date,
+                 debit, credit, remarks, user_id):
+    last = query_one(
+        """
+        SELECT balance_after_transaction FROM ledger_entries
+        WHERE  company_id = %s AND customer_id = %s
+        ORDER  BY entry_id DESC LIMIT 1
+        """,
+        (company_id, customer_id)
+    )
+    prev = Decimal(str(last['balance_after_transaction'])) if last else Decimal('0.00')
+    new_balance = prev + Decimal(str(debit)) - Decimal(str(credit))
+
+    insert_returning(
+        """
+        INSERT INTO ledger_entries
+            (company_id, customer_id, transaction_type, reference_type,
+             reference_id, transaction_date, debit_amount, credit_amount,
+             balance_after_transaction, remarks, created_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+        RETURNING entry_id
+        """,
+        (company_id, customer_id,
+         'DEBIT' if debit > 0 else 'CREDIT',
+         ref_type, ref_id, date, debit, credit,
+         new_balance, remarks)
+     )
+
+
+class PaymentListView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = PaymentSerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+        invoice_id  = request.query_params.get('invoice_id')
+        customer_id = request.query_params.get('customer_id')
+
+        where  = ["p.company_id = %s"]
+        params = [company_id]
+        if invoice_id:
+            where.append("p.invoice_id = %s");  params.append(invoice_id)
+        if customer_id:
+            where.append("p.customer_id = %s"); params.append(customer_id)
+
+        rows = query_all(
+            f"""
+            SELECT p.payment_id, p.invoice_id, p.company_id, p.customer_id,
+                   p.payment_date, p.payment_method, p.reference_number, p.amount,
+                   p.notes, p.created_at, p.created_by, p.updated_by, p.updated_at,
+                   i.invoice_number,
+                   c.company_name AS customer_name
+            FROM   payments p
+            JOIN   invoices  i ON i.invoice_id  = p.invoice_id
+            JOIN   customers c ON c.customer_id = p.customer_id
+            WHERE  {' AND '.join(where)}
+            ORDER  BY p.payment_date DESC, p.payment_id DESC
+            """,
+            tuple(params)
+        )
+        serializer = self.get_serializer(data=rows, many=True)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Payments fetched successfully",
+            data={
+                'payments': serializer.validated_data,
+                'count': len(serializer.validated_data)
+            }
+        )
+
+    def post(self, request):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return CommonResponse.error(
+                message="Invalid input",
+                errors=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        d = serializer.validated_data
+        invoice_id = d.get('invoice_id')
+
+        try:
+            with transaction.atomic():
+                invoice = query_one(
+                    """
+                    SELECT invoice_id, customer_id, due_amount, grand_total,
+                           invoice_number, payment_status
+                    FROM   invoices
+                    WHERE  invoice_id = %s AND company_id = %s
+                    """,
+                    (invoice_id, company_id)
+                )
+                if not invoice:
+                    return CommonResponse.error(
+                        message="Invoice not found",
+                        status_code=status.HTTP_404_NOT_FOUND
+                    )
+
+                amount = Decimal(str(d.get('amount', 0)))
+                due    = Decimal(str(invoice['due_amount']))
+                if amount <= 0:
+                    return CommonResponse.error(
+                        message="Amount must be > 0",
+                        status_code=status.HTTP_400_BAD_REQUEST
+                    )
+                if amount > due:
+                    return CommonResponse.error(
+                        message=f"Amount exceeds due {due}",
+                        status_code=status.HTTP_400_BAD_REQUEST
+                    )
+
+                payment = insert_returning(
+                    """
+                    INSERT INTO payments
+                        (invoice_id, company_id, customer_id, payment_date,
+                         payment_method, reference_number, amount, notes, created_at,
+                         created_by, updated_by, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW())
+                    RETURNING *
+                    """,
+                    (
+                        invoice['invoice_id'], company_id, invoice['customer_id'],
+                        d.get('payment_date'), d.get('payment_method', 'CASH'),
+                        d.get('reference_number', ''), amount,
+                        d.get('notes', ''), user_id, user_id,
+                    )
+                )
+
+                # Bug #10: clamp sub-penny residuals to zero to prevent
+                # invoices being stuck in PARTIAL when visually at ₹0.00.
+                new_due = due - amount
+                if new_due < Decimal('0.01'):
+                    new_due = Decimal('0.00')
+                new_status = 'PAID' if new_due == Decimal('0.00') else 'PARTIAL'
+                execute(
+                    """
+                    UPDATE invoices
+                    SET due_amount = %s, payment_status = %s,
+                        updated_at = NOW(), updated_by = %s
+                    WHERE invoice_id = %s
+                    """,
+                    (new_due, new_status, user_id, invoice['invoice_id'])
+                )
+
+                _post_ledger(
+                    company_id, invoice['customer_id'],
+                    'PAYMENT', payment['payment_id'],
+                    d.get('payment_date'),
+                    Decimal('0.00'), amount,
+                    f"Payment received for {invoice['invoice_number']}",
+                    user_id,
+                )
+        except Exception as e:
+            return CommonResponse.error(
+                message=f"Failed to record payment: {str(e)}",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Retrieve extra fields for formatting output nicely
+        full_payment = query_one(
+            """
+            SELECT p.*, i.invoice_number, c.company_name
+            FROM   payments p
+            JOIN   invoices  i ON i.invoice_id  = p.invoice_id
+            JOIN   customers c ON c.customer_id = p.customer_id
+            WHERE  p.payment_id = %s
+            """,
+            (payment['payment_id'],)
+        )
+
+        out_serializer = self.get_serializer(data=full_payment)
+        out_serializer.is_valid(raise_exception=True)
+
+        return CommonResponse.success(
+            message="Payment recorded successfully",
+            data=out_serializer.validated_data,
+            status_code=status.HTTP_201_CREATED
+        )
+
+
+class PaymentDetailView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = PaymentSerializer
+
+    def get(self, request, payment_id):
+        company_id = request.user.company_id
+        row = query_one(
+            """
+            SELECT p.*, i.invoice_number, c.company_name
+            FROM   payments p
+            JOIN   invoices  i ON i.invoice_id  = p.invoice_id
+            JOIN   customers c ON c.customer_id = p.customer_id
+            WHERE  p.payment_id = %s AND p.company_id = %s
+            """,
+            (payment_id, company_id)
+        )
+        if not row:
+            return CommonResponse.error(
+                message="Payment not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+        serializer = self.get_serializer(data=row)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Payment details fetched successfully",
+            data=serializer.validated_data
+        )
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views\products_view.py
+--------------------------------------------------------------------------------
+
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
+
+from billing.helper.db import query_all, query_one, insert_returning, execute
+from billing.helper.auth import JWTAuthentication
+from billing.helper.common_response import CommonResponse
+from billing.serializers.products_serializer import ProductSerializer
+
+
+class ProductListView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = ProductSerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+        search = request.query_params.get('search', '')
+        rows = query_all(
+            """
+            SELECT product_id, company_id, customer_id, product_name, hsn_code,
+                   gst_percentage, height, width, price, description, status,
+                   created_at, created_by, updated_at, updated_by
+            FROM   products
+            WHERE  company_id = %s
+              AND  status != 'D'
+              AND  (product_name ILIKE %s OR hsn_code ILIKE %s)
+            ORDER  BY product_name
+            """,
+            (company_id, f'%{search}%', f'%{search}%')
+        )
+        serializer = self.get_serializer(data=rows, many=True)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Products fetched successfully",
+            data={
+                'products': serializer.validated_data,
+                'count': len(serializer.validated_data)
+            }
+        )
+
+    def post(self, request):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return CommonResponse.error(
+                message="Invalid input",
+                errors=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        d = serializer.validated_data
+        row = insert_returning(
+            """
+            INSERT INTO products
+                (company_id, customer_id, product_name, hsn_code, gst_percentage,
+                 height, width, price, description,
+                 status, created_at, created_by, updated_at, updated_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'A',NOW(),%s,NOW(),%s)
+            RETURNING product_id, company_id, customer_id, product_name, hsn_code,
+                      gst_percentage, height, width, price, description, status,
+                      created_at, created_by, updated_at, updated_by
+            """,
+            (
+                company_id,
+                d.get('customer_id'),
+                d.get('product_name'), d.get('hsn_code'),
+                d.get('gst_percentage', 18.00),
+                d.get('height', 0.00), d.get('width', 0.00),
+                d.get('price', 0.00), d.get('description', ''),
+                user_id, user_id,
+            )
+        )
+
+        out_serializer = self.get_serializer(data=row)
+        out_serializer.is_valid(raise_exception=True)
+
+        return CommonResponse.success(
+            message="Product created successfully",
+            data=out_serializer.validated_data,
+            status_code=status.HTTP_201_CREATED
+        )
+
+
+class ProductDetailView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = ProductSerializer
+
+    def get(self, request, product_id):
+        company_id = request.user.company_id
+        row = query_one(
+            """
+            SELECT product_id, company_id, customer_id, product_name, hsn_code,
+                   gst_percentage, height, width, price, description, status,
+                   created_at, created_by, updated_at, updated_by
+            FROM   products
+            WHERE  product_id = %s AND company_id = %s AND status != 'D'
+            """,
+            (product_id, company_id)
+        )
+        if not row:
+            return CommonResponse.error(
+                message="Product not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+        serializer = self.get_serializer(data=row)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Product fetched successfully",
+            data=serializer.validated_data
+        )
+
+    def put(self, request, product_id):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return CommonResponse.error(
+                message="Invalid input",
+                errors=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        d = serializer.validated_data
+        rows_updated = execute(
+            """
+            UPDATE products SET
+                customer_id    = %s,
+                product_name   = %s, hsn_code       = %s,
+                gst_percentage = %s, height         = %s,
+                width          = %s, price          = %s,
+                description    = %s, updated_at     = NOW(),
+                updated_by     = %s
+            WHERE product_id = %s AND company_id = %s AND status != 'D'
+            """,
+            (
+                d.get('customer_id'),
+                d.get('product_name'), d.get('hsn_code'),
+                d.get('gst_percentage', 18.00),
+                d.get('height', 0.00), d.get('width', 0.00),
+                d.get('price', 0.00), d.get('description', ''),
+                user_id, product_id, company_id,
+            )
+        )
+        if rows_updated == 0:
+            return CommonResponse.error(
+                message="Product not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+        return CommonResponse.success(message="Product updated successfully")
+
+    def delete(self, request, product_id):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        rows_updated = execute(
+            """
+            UPDATE products SET status = 'D', updated_at = NOW(), updated_by = %s
+            WHERE product_id = %s AND company_id = %s AND status != 'D'
+            """,
+            (user_id, product_id, company_id)
+        )
+        if rows_updated == 0:
+            return CommonResponse.error(
+                message="Product not found",
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+        return CommonResponse.success(message="Product deleted successfully")
+
+
+--------------------------------------------------------------------------------
+FILE: billing\views\reports_view.py
+--------------------------------------------------------------------------------
+
+from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
+
+from billing.helper.db import query_all, query_one
+from billing.helper.auth import JWTAuthentication
+from billing.helper.common_response import CommonResponse
+from billing.serializers.reports_serializer import (
+    GSTSummarySerializer,
+    GSTR1Serializer,
+    HSNSummarySerializer,
+    MonthlySalesSerializer
+)
+
+
+class GSTSummaryView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = GSTSummarySerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+        month      = request.query_params.get('month')
+        year       = request.query_params.get('year')
+
+        if not month or not year:
+            return CommonResponse.error(
+                message="month and year required",
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        row = query_one(
+            """
+            SELECT
+                COUNT(*)::int                                 AS invoice_count,
+                COALESCE(SUM(subtotal), 0.00)                 AS taxable_amount,
+                COALESCE(SUM(cgst_amount), 0.00)              AS total_cgst,
+                COALESCE(SUM(sgst_amount), 0.00)              AS total_sgst,
+                COALESCE(SUM(igst_amount), 0.00)              AS total_igst,
+                COALESCE(SUM(grand_total), 0.00)              AS grand_total
+            FROM   invoices
+            WHERE  company_id    = %s
+              AND  invoice_type  = 'GST'
+              AND  EXTRACT(MONTH FROM invoice_date) = %s
+              AND  EXTRACT(YEAR  FROM invoice_date) = %s
+            """,
+            (company_id, month, year)
+        )
+        serializer = self.get_serializer(data=row or {
+            'invoice_count': 0, 'taxable_amount': 0.00,
+            'total_cgst': 0.00, 'total_sgst': 0.00, 'total_igst': 0.00, 'grand_total': 0.00
+        })
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="GST summary fetched successfully",
+            data=serializer.validated_data
+        )
+
+
+class GSTR1View(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = GSTR1Serializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+        month      = request.query_params.get('month')
+        year       = request.query_params.get('year')
+
+        if not month or not year:
+            return CommonResponse.error(
+                message="month and year required",
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        rows = query_all(
+            """
+            SELECT
+                i.invoice_number, i.invoice_date,
+                c.company_name, c.gstin AS customer_gstin,
+                c.state AS customer_state,
+                i.subtotal AS taxable_value,
+                i.cgst_amount, i.sgst_amount, i.igst_amount,
+                i.grand_total
+            FROM   invoices i
+            JOIN   customers c ON c.customer_id = i.customer_id
+            WHERE  i.company_id   = %s
+              AND  i.invoice_type = 'GST'
+              AND  EXTRACT(MONTH FROM i.invoice_date) = %s
+              AND  EXTRACT(YEAR  FROM i.invoice_date) = %s
+            ORDER  BY i.invoice_date, i.invoice_number
+            """,
+            (company_id, month, year)
+        )
+        serializer = self.get_serializer(data=rows, many=True)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="GSTR-1 report fetched successfully",
+            data={
+                'gstr1': serializer.validated_data,
+                'count': len(serializer.validated_data)
+            }
+        )
+
+
+class HSNSummaryView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = HSNSummarySerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+        month      = request.query_params.get('month')
+        year       = request.query_params.get('year')
+
+        if not month or not year:
+            return CommonResponse.error(
+                message="month and year required",
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        rows = query_all(
+            """
+            SELECT
+                COALESCE(p.hsn_code, 'N/A')                    AS hsn_code,
+                COALESCE(p.product_name, ii.product_name, '')   AS product_name,
+                SUM(ii.quantity)       AS total_qty,
+                SUM(ii.taxable_amount) AS taxable_value,
+                SUM(ii.cgst_amount)    AS cgst,
+                SUM(ii.sgst_amount)    AS sgst,
+                SUM(ii.igst_amount)    AS igst,
+                SUM(ii.total_amount)   AS total
+            FROM   invoice_items ii
+            JOIN   invoices i ON i.invoice_id = ii.invoice_id
+            LEFT   JOIN products p ON p.product_id = ii.product_id
+            WHERE  i.company_id   = %s
+              AND  i.invoice_type = 'GST'
+              AND  EXTRACT(MONTH FROM i.invoice_date) = %s
+              AND  EXTRACT(YEAR  FROM i.invoice_date) = %s
+            GROUP  BY COALESCE(p.hsn_code, 'N/A'),
+                      COALESCE(p.product_name, ii.product_name, '')
+            ORDER  BY taxable_value DESC
+            """,
+            (company_id, month, year)
+        )
+        serializer = self.get_serializer(data=rows, many=True)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="HSN summary fetched successfully",
+            data={
+                'hsn_summary': serializer.validated_data
+            }
+        )
+
+
+class MonthlySalesView(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes     = [IsAuthenticated]
+    serializer_class       = MonthlySalesSerializer
+
+    def get(self, request):
+        company_id = request.user.company_id
+        rows = query_all(
+            """
+            SELECT
+                TO_CHAR(invoice_date, 'Mon YYYY')     AS month_label,
+                EXTRACT(YEAR  FROM invoice_date)::int AS yr,
+                EXTRACT(MONTH FROM invoice_date)::int AS mo,
+                COALESCE(SUM(grand_total), 0.00)         AS total_sales,
+                COALESCE(SUM(cgst_amount + sgst_amount + igst_amount), 0.00) AS total_tax,
+                COUNT(*)::int                              AS invoice_count
+            FROM   invoices
+            WHERE  company_id   = %s
+              AND  invoice_date >= CURRENT_DATE - INTERVAL '12 months'
+            GROUP  BY month_label, yr, mo
+            ORDER  BY yr, mo
+            """,
+            (company_id,)
+        )
+        serializer = self.get_serializer(data=rows, many=True)
+        serializer.is_valid(raise_exception=True)
+        return CommonResponse.success(
+            message="Monthly sales trend fetched successfully",
+            data={
+                'monthly_sales': serializer.validated_data
+            }
+        )
+
+
+--------------------------------------------------------------------------------
+FILE: BillingApp\__init__.py
+--------------------------------------------------------------------------------
+
+
+
+
+--------------------------------------------------------------------------------
+FILE: BillingApp\asgi.py
+--------------------------------------------------------------------------------
+
+"""
+ASGI config for BillingApp project.
+
+It exposes the ASGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/6.0/howto/deployment/asgi/
+"""
+
+import os
+
+from django.core.asgi import get_asgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'BillingApp.settings')
+
+application = get_asgi_application()
+
+
+
+--------------------------------------------------------------------------------
+FILE: BillingApp\settings.py
+--------------------------------------------------------------------------------
+
+# BillingApp/BillingApp/settings.py
+
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+SECRET_KEY = "django-insecure-o$^$-z8t*q-2%pb-c3g+*0eeez@du)vx$h97!^8u1z=54^x2pq"
+DEBUG = True
+ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+
+INSTALLED_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "corsheaders", 
+    "rest_framework",
+    "billing",
+]
+
+MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+ROOT_URLCONF = "BillingApp.urls"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / 'templates'],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = "BillingApp.wsgi.application"
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "billingapp",
+        "USER": "postgres",
+        "PASSWORD": "admin",
+        "HOST": "localhost",
+        "PORT": "5432",
+    }
+}
+
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# Allow Vite dev server origin explicitly
+CORS_ALLOWED_ORIGINS  = ['http://localhost:5173']
+# Electron production loads from file:// which sends Origin: null.
+# django-cors-headers cannot match 'null' via CORS_ALLOWED_ORIGINS,
+# so we use CORS_ALLOW_ALL_ORIGINS. This is safe because the Django
+# server only ever binds to 127.0.0.1 / localhost.
+CORS_ALLOW_ALL_ORIGINS  = True
+CORS_ALLOW_CREDENTIALS = True
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'DEFAULT_PERMISSION_CLASSES':     [],
+}
+
+# Load JWT secret from environment; fall back to dev default only in development.
+# In production, set the JWT_SECRET environment variable to a strong random value.
+JWT_SECRET       = os.environ.get('JWT_SECRET', 'jwt-dev-secret')
+JWT_EXPIRY_HOURS = 24
+
+# ✅ Fixed: removed duplicate LANGUAGE_CODE
+LANGUAGE_CODE = 'en-us'
+TIME_ZONE     = 'Asia/Kolkata'
+USE_I18N      = True
+USE_TZ        = True
+
+STATIC_URL = '/static/'
+MEDIA_URL  = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+--------------------------------------------------------------------------------
+FILE: BillingApp\urls.py
+--------------------------------------------------------------------------------
+
+from django.urls import path, include
+
+urlpatterns = [
+    path('api/', include('billing.urls')),
+]
+
+
+--------------------------------------------------------------------------------
+FILE: BillingApp\wsgi.py
+--------------------------------------------------------------------------------
+
+"""
+WSGI config for BillingApp project.
+
+It exposes the WSGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/6.0/howto/deployment/wsgi/
+"""
+
+import os
+
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'BillingApp.settings')
+
+application = get_wsgi_application()
+
+

@@ -1,0 +1,67 @@
+from rest_framework import serializers
+
+
+class InvoiceItemSerializer(serializers.Serializer):
+    item_id         = serializers.IntegerField(required=False)
+    invoice_id      = serializers.IntegerField(required=False)
+    company_id      = serializers.IntegerField(required=False)
+    product_id      = serializers.IntegerField(required=False, allow_null=True)
+    quantity        = serializers.DecimalField(max_digits=12, decimal_places=2, default=1.00)
+    unit_price      = serializers.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    gst_percentage  = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0.00)
+    taxable_amount  = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    cgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    sgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    igst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    total_amount    = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+
+    # Snapshot fields / Joined fields from products table
+    product_name    = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    hsn_code        = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    description     = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    created_at      = serializers.DateTimeField(required=False)
+
+
+class InvoiceSerializer(serializers.Serializer):
+    invoice_id      = serializers.IntegerField(required=False)
+    company_id      = serializers.IntegerField(required=False)
+    customer_id     = serializers.IntegerField(required=True)
+    invoice_number  = serializers.CharField(max_length=100, required=False)
+    invoice_type    = serializers.CharField(max_length=20, required=False, default='GST')
+    invoice_date    = serializers.DateField(required=True)
+    subtotal        = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    cgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    sgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    igst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    discount_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0.00)
+    round_off       = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    grand_total     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    due_amount      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    payment_status  = serializers.CharField(max_length=20, required=False)
+    notes           = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    created_at      = serializers.DateTimeField(required=False)
+    created_by      = serializers.IntegerField(required=False)
+    updated_at      = serializers.DateTimeField(required=False)
+    updated_by      = serializers.IntegerField(required=False)
+
+    # Joined fields from customers table
+    customer_name    = serializers.CharField(required=False, allow_null=True)
+    customer_mobile  = serializers.CharField(required=False, allow_null=True)
+    contact_person   = serializers.CharField(required=False, allow_null=True)
+    customer_address = serializers.CharField(required=False, allow_null=True)
+    customer_city    = serializers.CharField(required=False, allow_null=True)
+    customer_state   = serializers.CharField(required=False, allow_null=True)
+    customer_gstin   = serializers.CharField(required=False, allow_null=True)
+    customer_email   = serializers.CharField(required=False, allow_null=True)
+
+    # Nested items list
+    items           = InvoiceItemSerializer(many=True, required=False)
+
+
+
+class DashboardStatsSerializer(serializers.Serializer):
+    total_invoices   = serializers.IntegerField()
+    total_billed     = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_pending    = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_collected  = serializers.DecimalField(max_digits=12, decimal_places=2)
+    pending_count    = serializers.IntegerField()
