@@ -1,19 +1,25 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
+import { writeFile } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1366,
+    height: 768,
+    minWidth: 1100,
+    minHeight: 650,
+    frame: false,
+    backgroundColor: '#F1F5F9',
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      contextIsolation: true
     }
   })
 
@@ -22,8 +28,89 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
+    if (details.url.startsWith('http:') || details.url.startsWith('https:')) {
+      shell.openExternal(details.url)
+      return { action: 'deny' }
+    }
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        webPreferences: {
+          contextIsolation: false,
+          nodeIntegration: false,
+          sandbox: false
+        }
+      }
+    }
+  })
+
+  // IPC controls for frameless window
+  ipcMain.on('window-minimize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize()
+  })
+  ipcMain.on('window-maximize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMaximized()) mainWindow.restore()
+      else mainWindow.maximize()
+    }
+  })
+  ipcMain.on('window-close', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
+  })
+
+  // ── PDF Download via printToPDF ──────────────────────────────────────────
+  ipcMain.handle('save-invoice-pdf', async (_event, { htmlContent, filename }) => {
+    // 1. Ask user where to save
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save Invoice PDF',
+      defaultPath: filename,
+      filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
+    })
+    if (canceled || !filePath) {
+      return { success: false, reason: 'cancelled' }
+    }
+
+    // 2. Create a hidden off-screen window to render the HTML
+    const pdfWin = new BrowserWindow({
+      show: false,
+      width: 900,
+      height: 1200,
+      webPreferences: {
+        contextIsolation: true,
+        sandbox: false
+      }
+    })
+
+    try {
+      // 3. Load the HTML string as a data URL
+      const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`
+      await pdfWin.loadURL(dataUrl)
+
+      // 4. Small settle delay so fonts/layout are stable
+      await new Promise((resolve) => setTimeout(resolve, 600))
+
+      // 5. Generate PDF bytes
+      const pdfData = await pdfWin.webContents.printToPDF({
+        pageSize: 'A4',
+        printBackground: true,
+        margins: { marginType: 'custom', top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 }
+      })
+
+      // 6. Write to disk
+      await new Promise<void>((resolve, reject) => {
+        writeFile(filePath, pdfData, (err) => {
+          if (err) reject(err)
+          else resolve()
+        })
+      })
+
+      return { success: true, filePath }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { success: false, reason: message }
+    } finally {
+      pdfWin.destroy()
+    }
   })
 
   // HMR for renderer base on electron-vite cli.
@@ -72,3 +159,4 @@ app.on('window-all-closed', () => {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
+
