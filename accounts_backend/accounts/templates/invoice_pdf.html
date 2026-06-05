@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>{{ invoice_type_label }} – {{ invoice.invoice_number }}</title>
+    {% load static %}
+    <style>
+        /* ═══════════════════════════════════════════════════════════════════════════
+   PAGE SETUP  — A4, tight margins so content fills ≥ 85 % of the page
+   ═══════════════════════════════════════════════════════════════════════════ */
+        @page {
+            size: A4 portrait;
+            margin: 8mm 8mm 8mm 8mm;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   RESET & BASE
+   ═══════════════════════════════════════════════════════════════════════════ */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 8.5pt;
+            color: #000;
+            background: #fff;
+            line-height: 1.35;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   OUTER WRAPPER — single solid border around the full invoice
+   ═══════════════════════════════════════════════════════════════════════════ */
+        .invoice-wrap {
+            width: 100%;
+            border: 1.5px solid #000;
+            min-height: 270mm;
+            /* nearly full A4 height */
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   SECTION HELPERS
+   ═══════════════════════════════════════════════════════════════════════════ */
+        .section {
+            border-bottom: 1px solid #000;
+            padding: 4px 6px;
+        }
+
+        .section:last-child {
+            border-bottom: none;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   1. TITLE BAR
+   ═══════════════════════════════════════════════════════════════════════════ */
+        .title-bar {
+            text-align: center;
+            padding: 5px 6px 3px;
+            border-bottom: 1.5px solid #000;
+        }
+
+        .title-bar .bill-type {
+            font-size: 8pt;
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .title-bar .company-name {
+            font-size: 17pt;
+            font-weight: bold;
+            letter-spacing: 1px;
+            line-height: 1.15;
+            margin: 1px 0;
+        }
+
+        .title-bar .company-addr {
+            font-size: 7.5pt;
+            line-height: 1.4;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   2. GSTIN STRIP
+   ═══════════════════════════════════════════════════════════════════════════ */
+        .gstin-strip {
+            text-align: center;
+            font-size: 8pt;
+            font-weight: bold;
+            padding: 3px 6px;
+            background: #e8e8e8;
+            border-bottom: 1px solid #000;
+            letter-spacing: 1px;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   3. CUSTOMER ↔ INVOICE META (two-column)
+   ═══════════════════════════════════════════════════════════════════════════ */
+        .info-row {
+            display: flex;
+            border-bottom: 1px solid #000;
+        }
+
+        .info-col {
+            flex: 1;
+            padding: 4px 7px;
+            font-size: 8pt;
+            line-height: 1.5;
+        }
+
+        .info-col+.info-col {
+            border-left: 1px solid #000;
+        }
+
+        .info-col .label {
+            font-weight: bold;
+            display: inline-block;
+            min-width: 70px;
+        }
+
+        .info-col .block-title {
+            font-weight: bold;
+            font-size: 8.5pt;
+            text-decoration: underline;
+            margin-bottom: 2px;
+        }
+
+        .meta-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .meta-table td {
+            padding: 0 2px;
+            font-size: 8pt;
+            vertical-align: top;
+        }
+
+        .meta-table td:first-child {
+            font-weight: bold;
+            white-space: nowrap;
+            padding-right: 4px;
+            min-width: 90px;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   4. LINE-ITEMS TABLE
+   ═══════════════════════════════════════════════════════════════════════════ */
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            flex: 1;
+            /* pushes footer toward page bottom */
+        }
+
+        .items-table th,
+        .items-table td {
+            border: 1px solid #000;
+            padding: 3px 5px;
+            vertical-align: middle;
+        }
+
+        /* Remove outer-left and outer-right borders (handled by .invoice-wrap) */
+        .items-table th:first-child,
+        .items-table td:first-child {
+            border-left: none;
+        }
+
+        .items-table th:last-child,
+        .items-table td:last-child {
+            border-right: none;
+        }
+
+        /* Remove top border on first header row (handled by section above) */
+        .items-table thead tr:first-child th {
+            border-top: none;
+        }
+
+        .items-table thead th {
+            background: #d0d0d0;
+            font-weight: bold;
+            text-align: center;
+            font-size: 8pt;
+            letter-spacing: 0.3px;
+        }
+
+        .items-table tbody td {
+            font-size: 8pt;
+        }
+
+        .items-table tbody tr.empty-row td {
+            height: 14px;
+        }
+
+        /* Numeric columns right-aligned */
+        .items-table .num {
+            text-align: right;
+        }
+
+        .items-table .cen {
+            text-align: center;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   5. GST NOTE + TOTALS ROW
+   ═══════════════════════════════════════════════════════════════════════════ */
+        .totals-row {
+            display: flex;
+            border-top: 1.5px solid #000;
+            border-bottom: 1px solid #000;
+            min-height: 62px;
+        }
+
+        .gst-note-col {
+            flex: 1;
+            padding: 5px 7px;
+            font-size: 7.5pt;
+            border-right: 1px solid #000;
+            display: flex;
+            align-items: flex-end;
+        }
+
+        .totals-col {
+            width: 200px;
+            padding: 0;
+        }
+
+        .totals-col table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .totals-col table td {
+            padding: 2px 6px;
+            font-size: 8pt;
+            border-bottom: 1px solid #d0d0d0;
+        }
+
+        .totals-col table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .totals-col .t-label {
+            font-weight: bold;
+        }
+
+        .totals-col .t-value {
+            text-align: right;
+            font-family: 'Courier New', monospace;
+        }
+
+        .totals-col .grand-row td {
+            background: #d0d0d0;
+            font-weight: bold;
+            font-size: 9pt;
+            border-top: 1.5px solid #000;
+            border-bottom: none;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   6. AMOUNT IN WORDS
+   ═══════════════════════════════════════════════════════════════════════════ */
+        .amount-words {
+            padding: 4px 7px;
+            font-size: 7.5pt;
+            font-weight: bold;
+            border-bottom: 1px solid #000;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════════════
+   7. BANK DETAILS + TERMS + SIGNATURE  (three-column bottom strip)
+   ═══════════════════════════════════════════════════════════════════════════ */
+        .bottom-strip {
+            display: flex;
+            min-height: 60px;
+        }
+
+        .bottom-col {
+            padding: 5px 7px;
+            font-size: 7.5pt;
+            line-height: 1.6;
+            flex: 1;
+        }
+
+        .bottom-col+.bottom-col {
+            border-left: 1px solid #000;
+        }
+
+        .bottom-col .col-title {
+            font-weight: bold;
+            font-size: 8pt;
+            text-decoration: underline;
+            margin-bottom: 3px;
+            display: block;
+        }
+
+        .bottom-col .b-label {
+            font-weight: bold;
+            display: inline-block;
+            min-width: 82px;
+        }
+
+        /* QR code next to bank details */
+        .bank-inner {
+            display: flex;
+            gap: 6px;
+        }
+
+        .bank-text {
+            flex: 1;
+        }
+
+        .qr-box {
+            width: 58px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 2px;
+        }
+
+        .qr-box img {
+            width: 56px;
+            height: 56px;
+            border: 1px solid #999;
+            object-fit: contain;
+        }
+
+        .qr-box span {
+            font-size: 6.5pt;
+            text-align: center;
+        }
+
+        /* Signature column */
+        .sig-col {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-end;
+            text-align: center;
+            padding: 5px 10px;
+            min-width: 160px;
+            flex-shrink: 0;
+        }
+
+        .sig-col .for-label {
+            font-size: 7.5pt;
+            font-weight: bold;
+            align-self: flex-end;
+        }
+
+        .sig-col img.sig-img {
+            width: 90px;
+            height: 38px;
+            object-fit: contain;
+            margin: 2px auto;
+        }
+
+        .sig-col .auth-label {
+            font-size: 7.5pt;
+            font-weight: bold;
+            text-align: center;
+            border-top: 1px solid #000;
+            padding-top: 2px;
+            width: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="invoice-wrap">
+
+        <!-- ═══════════════════════════════════════════════════════════════════════
+       1. TITLE BAR
+       ═══════════════════════════════════════════════════════════════════════ -->
+        <div class="title-bar">
+            <div class="bill-type">{{ invoice_type_label }}</div>
+            <div class="company-name">{{ company.company_name|upper }}</div>
+            <div class="company-addr">
+                {{ company.address }}{% if company.city %}, {{ company.city }}{% endif %}{% if company.pincode %} – {{
+                company.pincode }}{% endif %}<br>
+                Phone&nbsp;:&nbsp;{{ company.phone|default:"—" }}
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                E-Mail&nbsp;:&nbsp;{{ company.email|default:"—" }}
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════════
+       2. GSTIN STRIP
+       ═══════════════════════════════════════════════════════════════════════ -->
+        <div class="gstin-strip">
+            GSTIN&nbsp;:&nbsp;{{ company.gstin|default:"N/A" }}
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════════
+       3. CUSTOMER ↔ INVOICE META
+       ═══════════════════════════════════════════════════════════════════════ -->
+        <div class="info-row">
+
+            <!-- Customer -->
+            <div class="info-col">
+                <div class="block-title">M/s {{ invoice.customer_name|upper }}</div>
+                {% if invoice.customer_address %}{{ invoice.customer_address }}{% endif %}
+                {% if invoice.customer_city %}, {{ invoice.customer_city }}{% endif %}
+                {% if invoice.customer_state %}&nbsp;&nbsp;State&nbsp;:&nbsp;{{ invoice.customer_state }}{% endif %}
+                <br>
+                PH.NO.&nbsp;:&nbsp;{{ invoice.customer_mobile|default:"—" }}<br>
+                {% if invoice.customer_gstin %}
+                GSTIN&nbsp;:&nbsp;{{ invoice.customer_gstin }}
+                {% endif %}
+            </div>
+
+            <!-- Invoice meta -->
+            <div class="info-col">
+                <table class="meta-table">
+                    <tr>
+                        <td>Invoice No.</td>
+                        <td>:&nbsp;<strong>{{ invoice.invoice_number }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Date</td>
+                        <td>:&nbsp;{{ invoice_date_fmt }}</td>
+                    </tr>
+                    <tr>
+                        <td>Order No.</td>
+                        <td>:&nbsp;{{ invoice.order_number|default:"" }}</td>
+                    </tr>
+                    <tr>
+                        <td>L.R. No.</td>
+                        <td>:&nbsp;{{ invoice.lr_number|default:"" }}</td>
+                    </tr>
+                    <tr>
+                        <td>Cases</td>
+                        <td>:&nbsp;{{ invoice.cases|default:"0" }}</td>
+                    </tr>
+                    <tr>
+                        <td>Transport</td>
+                        <td>:&nbsp;{{ invoice.transport|default:"" }}</td>
+                    </tr>
+                    <tr>
+                        <td>Due Date</td>
+                        <td>:&nbsp;{{ due_date_fmt }}</td>
+                    </tr>
+                </table>
+            </div>
+
+        </div><!-- /info-row -->
+
+        <!-- ═══════════════════════════════════════════════════════════════════════
+       4. LINE-ITEMS TABLE
+       ═══════════════════════════════════════════════════════════════════════ -->
+        <table class="items-table">
+            <thead>
+                <tr>
+                    <th style="width:28px;">SN.</th>
+                    <th>PRODUCT NAME</th>
+                    <th style="width:70px;">HSN CODE</th>
+                    <th style="width:42px;">QTY</th>
+                    <th style="width:60px;">RATE</th>
+
+                    {% if is_tax %}
+                    {% if is_interstate %}
+                    <th style="width:48px;">IGST&nbsp;%</th>
+                    {% else %}
+                    <th style="width:44px;">SGST&nbsp;%</th>
+                    <th style="width:44px;">CGST&nbsp;%</th>
+                    {% endif %}
+                    {% endif %}
+
+                    <th style="width:70px;">AMOUNT</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td class="cen">{{ forloop.counter }}</td>
+                    <td>{{ item.product_name }}</td>
+                    <td class="cen">{{ item.hsn_code|default:"" }}</td>
+                    <td class="cen">{{ item.quantity }}</td>
+                    <td class="num">{{ item.unit_price }}</td>
+
+                    {% if is_tax %}
+                    {% if is_interstate %}
+                    <td class="cen">{{ item.gst_percentage }}</td>
+                    {% else %}
+                    <td class="cen">{{ item.half_gst_pct }}</td>
+                    <td class="cen">{{ item.half_gst_pct }}</td>
+                    {% endif %}
+                    {% endif %}
+
+                    <td class="num">{{ item.total_amount }}</td>
+                </tr>
+                {% endfor %}
+
+                <!-- Padding rows to fill table height -->
+                {% for _ in empty_rows %}
+                <tr class="empty-row">
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    {% if is_tax %}
+                    {% if is_interstate %}<td></td>
+                    {% else %}<td></td>
+                    <td></td>{% endif %}
+                    {% endif %}
+                    <td></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <!-- ═══════════════════════════════════════════════════════════════════════
+       5. GST NOTE + TOTALS
+       ═══════════════════════════════════════════════════════════════════════ -->
+        <div class="totals-row">
+
+            <!-- Left: GST calculation note -->
+            <div class="gst-note-col">
+                {{ gst_note }}
+            </div>
+
+            <!-- Right: sub-totals block -->
+            <div class="totals-col">
+                <table>
+                    <tr>
+                        <td class="t-label">SUB TOTAL</td>
+                        <td class="t-value">{{ subtotal|floatformat:2 }}</td>
+                    </tr>
+
+                    {% if is_tax %}
+                    {% if is_interstate %}
+                    <tr>
+                        <td class="t-label">IGST {{ gst_pct }}%</td>
+                        <td class="t-value">{{ igst|floatformat:2 }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td class="t-label">SGST {{ half_gst_pct }}%</td>
+                        <td class="t-value">{{ sgst|floatformat:2 }}</td>
+                    </tr>
+                    <tr>
+                        <td class="t-label">CGST {{ half_gst_pct }}%</td>
+                        <td class="t-value">{{ cgst|floatformat:2 }}</td>
+                    </tr>
+                    {% endif %}
+                    {% endif %}
+
+                    {% if discount > 0 %}
+                    <tr>
+                        <td class="t-label">Discount</td>
+                        <td class="t-value">- {{ discount|floatformat:2 }}</td>
+                    </tr>
+                    {% endif %}
+
+                    <tr>
+                        <td class="t-label">Round Off</td>
+                        <td class="t-value">{{ round_off|floatformat:2 }}</td>
+                    </tr>
+
+                    <tr class="grand-row">
+                        <td class="t-label">GRAND TOTAL</td>
+                        <td class="t-value">{{ grand_total|floatformat:2 }}</td>
+                    </tr>
+                </table>
+            </div>
+
+        </div><!-- /totals-row -->
+
+        <!-- ═══════════════════════════════════════════════════════════════════════
+       6. AMOUNT IN WORDS
+       ═══════════════════════════════════════════════════════════════════════ -->
+        <div class="amount-words">
+            {{ amount_in_words }}
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════════
+       7. BOTTOM STRIP : BANK DETAILS | TERMS & CONDITIONS | SIGNATURE
+       ═══════════════════════════════════════════════════════════════════════ -->
+        <div class="bottom-strip">
+
+            <!-- Bank Details + QR -->
+            <div class="bottom-col">
+                <span class="col-title">Bank Details</span>
+                <div class="bank-inner">
+                    <div class="bank-text">
+                        <span class="b-label">Bank Name</span>:&nbsp;{{ company.bank_name|default:"—" }}<br>
+                        <span class="b-label">A/C No.</span>:&nbsp;{{ company.account_number|default:"—" }}<br>
+                        <span class="b-label">IFSC Code</span>:&nbsp;{{ company.ifsc_code|default:"—" }}<br>
+                        <span class="b-label">Branch</span>:&nbsp;{{ company.city|default:"—" }}<br>
+                    </div>
+                    <div class="qr-box">
+                        <!-- Replace qr_code.png with actual QR asset -->
+                        <img src="{{ qr_code_img_path }}" alt="Payment QR" />
+                        <span>Scan to Pay</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Terms & Conditions -->
+            <div class="bottom-col">
+                <span class="col-title">Terms &amp; Conditions</span>
+                <ol style="padding-left:12px; margin:0; font-size:7pt; line-height:1.7;">
+                    <li>Goods once sold will not be taken back or exchanged.</li>
+                    <li>Interest @ 1.5% per month will be charged on overdue payments.</li>
+                    <li>Subject to Ahmedabad jurisdiction only.</li>
+                </ol>
+            </div>
+
+            <!-- Authorised Signatory (no receiver signature) -->
+            <div class="bottom-col sig-col">
+                <span class="for-label">For {{ company.company_name|upper }}</span>
+                <!-- Replace signature.png with actual signature asset -->
+                <img src="{{ signature_img_path }}" alt="Authorised Signature" />
+                <span class="auth-label">Authorised Signatory</span>
+            </div>
+
+        </div><!-- /bottom-strip -->
+
+    </div><!-- /invoice-wrap -->
+</body>
+
+</html>

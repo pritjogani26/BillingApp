@@ -1,47 +1,60 @@
 from django.urls import path
-# from billing.views import (
-#     auth_view, company_view, customers_view,
-#     products_view, invoices_view, payments_view,
-#     ledger_view, reports_view
-# )
+
+from accounts.views.auth_view      import LoginView, ChangePasswordView, CurrentUserView
+from accounts.views.company_view   import CompanyProfileView
+from accounts.views.customers_view import CustomerListView, CustomerDetailView, CustomerLedgerSummaryView
+from accounts.views.products_view  import ProductListView, ProductDetailView
+from accounts.views.invoices_view  import InvoiceListView, InvoiceDetailView, InvoiceDownloadView, DashboardStatsView
+from accounts.views.payments_view  import PaymentListView, PaymentDetailView
+from accounts.views.ledger_view    import LedgerEntriesView, OutstandingReportView
+from accounts.views.reports_view   import (
+    GSTSummaryView,
+    GSTR1View,
+    HSNSummaryView,
+    MonthlySalesView,
+    GSTR1ExcelDownloadView,
+)
 
 urlpatterns = [
-    # ── auth ────────────────────────────────────────────────────────────────
-    # path("auth/health/", auth_view.HealthView.as_view(), name="health"),
-    # path("auth/login/",            auth_view.LoginView.as_view(),          name="login"),
-    # path("auth/me/", auth_view.MeView.as_view(), name="me"),
-    # path("auth/change-password/",  auth_view.ChangePasswordView.as_view(), name="change_password"),
 
-    # # ── company ─────────────────────────────────────────────────────────────
-    # path('company/profile/',        company_view.CompanyProfileView.as_view(), name='company_profile'),
-    # path('company/profile/update/', company_view.CompanyProfileView.as_view(), name='company_update'),
+    # ── Auth ─────────────────────────────────────────────────────────────────
+    path("auth/login/",           LoginView.as_view(),          name="login"),
+    path("auth/me/",              CurrentUserView.as_view(),     name="current_user"),
+    path("auth/change-password/", ChangePasswordView.as_view(), name="change_password"),
 
-    # # ── customers ───────────────────────────────────────────────────────────
-    # path('customers/',                           customers_view.CustomerListView.as_view(),           name='customer_list'),
-    # path('customers/<int:customer_id>/',         customers_view.CustomerDetailView.as_view(),         name='customer_detail'),
-    # path('customers/<int:customer_id>/summary/', customers_view.CustomerLedgerSummaryView.as_view(), name='customer_summary'),
+    # ── Company ──────────────────────────────────────────────────────────────
+    path("company/profile/", CompanyProfileView.as_view(), name="company_profile"),
 
-    # # ── products ────────────────────────────────────────────────────────────
-    # path('products/',                  products_view.ProductListView.as_view(),   name='product_list'),
-    # path('products/<int:product_id>/', products_view.ProductDetailView.as_view(), name='product_detail'),
+    # ── Customers ────────────────────────────────────────────────────────────
+    path("customers/",                            CustomerListView.as_view(),           name="customer_list"),
+    path("customers/<int:customer_id>/",          CustomerDetailView.as_view(),         name="customer_detail"),
+    path("customers/<int:customer_id>/summary/",  CustomerLedgerSummaryView.as_view(),  name="customer_summary"),
 
-    # # ── invoices ─────────────────────────────────────────────────────────────
-    # path('invoices/dashboard/',                    invoices_view.DashboardStatsView.as_view(),    name='dashboard'),       # ✅ Fixed: moved before <int:>
-    # path('invoices/',                              invoices_view.InvoiceListView.as_view(),       name='invoice_list'),
-    # path('invoices/<int:invoice_id>/',             invoices_view.InvoiceDetailView.as_view(),     name='invoice_detail'),
-    # path('invoices/<int:invoice_id>/download/',    invoices_view.InvoiceDownloadView.as_view(),   name='invoice_download'),
+    # ── Products ─────────────────────────────────────────────────────────────
+    path("products/",                   ProductListView.as_view(),   name="product_list"),
+    path("products/<int:product_id>/",  ProductDetailView.as_view(), name="product_detail"),
 
-    # # ── payments ────────────────────────────────────────────────────────────
-    # path('payments/',                  payments_view.PaymentListView.as_view(),   name='payment_list'),
-    # path('payments/<int:payment_id>/', payments_view.PaymentDetailView.as_view(), name='payment_detail'),
+    # ── Invoices ─────────────────────────────────────────────────────────────
+    # NOTE: static segments (dashboard) must come before <int:invoice_id>
+    path("invoices/dashboard/",                 DashboardStatsView.as_view(),   name="dashboard"),
+    path("invoices/",                           InvoiceListView.as_view(),      name="invoice_list"),
+    path("invoices/<int:invoice_id>/",          InvoiceDetailView.as_view(),    name="invoice_detail"),
+    path("invoices/<int:invoice_id>/download/", InvoiceDownloadView.as_view(),  name="invoice_download"),
 
-    # # ── ledger ──────────────────────────────────────────────────────────────
-    # path('ledger/outstanding/',           ledger_view.OutstandingReportView.as_view(), name='outstanding'),
-    # path('ledger/<int:customer_id>/',     ledger_view.LedgerEntriesView.as_view(),     name='ledger_entries'),
+    # ── Payments ─────────────────────────────────────────────────────────────
+    path("payments/",                   PaymentListView.as_view(),   name="payment_list"),
+    path("payments/<int:payment_id>/",  PaymentDetailView.as_view(), name="payment_detail"),
 
-    # # ── reports ─────────────────────────────────────────────────────────────
-    # path('reports/gst-summary/',   reports_view.GSTSummaryView.as_view(),   name='gst_summary'),
-    # path('reports/gstr1/',         reports_view.GSTR1View.as_view(),          name='gstr1'),
-    # path('reports/hsn-summary/',   reports_view.HSNSummaryView.as_view(),    name='hsn_summary'),
-    # path('reports/monthly-sales/', reports_view.MonthlySalesView.as_view(),  name='monthly_sales'),
+    # ── Ledger ───────────────────────────────────────────────────────────────
+    # NOTE: static segment (outstanding) must come before <int:customer_id>
+    path("ledger/outstanding/",          OutstandingReportView.as_view(), name="outstanding"),
+    path("ledger/<int:customer_id>/",    LedgerEntriesView.as_view(),     name="ledger_entries"),
+
+    # ── Reports ──────────────────────────────────────────────────────────────
+    path("reports/gst-summary/",        GSTSummaryView.as_view(),          name="gst_summary"),
+    path("reports/gstr1/",              GSTR1View.as_view(),               name="gstr1"),
+    path("reports/gstr1/download/",     GSTR1ExcelDownloadView.as_view(),  name="gstr1_download"),
+    path("reports/hsn-summary/",        HSNSummaryView.as_view(),          name="hsn_summary"),
+    path("reports/monthly-sales/",      MonthlySalesView.as_view(),        name="monthly_sales"),
+
 ]

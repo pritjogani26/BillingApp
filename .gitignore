@@ -12,12 +12,6 @@ ENV/
 *.env
 backend/.env
 
-backend/media/*
-!backend/media/defaults/
-
-staticfiles/
-static/
-
 *.log
 logs/
 users_middleware_errors
@@ -35,10 +29,6 @@ desktop.ini
 frontend/node_modules/
 frontend/build/
 frontend/dist/
-frontend/.env
-frontend/.env.local
-frontend/.env.development
-frontend/.env.production
 
 npm-debug.log*
 yarn-debug.log*
@@ -51,9 +41,6 @@ htmlcov/
 
 *.sql.bak
 *.dump
-
-backend/media/patients/
-backend/media/users/
 
 package-lock.json
 yarn.lock

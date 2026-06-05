@@ -9,6 +9,8 @@ from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.views import APIView
+import os
+from django.conf import settings
 
 from accounts.common.db               import query_all, query_one, insert_returning, execute
 from accounts.common.auth             import JWTAuthentication
@@ -18,7 +20,6 @@ from accounts.serializers.invoices_serializer import (
     InvoiceSerializer,
     DashboardStatsSerializer,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -434,13 +435,55 @@ class InvoiceDetailView(generics.GenericAPIView):
         )
 
 
+# ── helpers (keep in sync with invoices_view.py) ─────────────────────────────
+
+_ones = [
+    '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+    'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
+    'Seventeen', 'Eighteen', 'Nineteen',
+]
+_tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty',
+         'Sixty', 'Seventy', 'Eighty', 'Ninety']
+
+
+def _to_words(num: int) -> str:
+    if num == 0:           return 'Zero'
+    if num < 20:           return _ones[num]
+    if num < 100:          return _tens[num // 10] + (' ' + _ones[num % 10] if num % 10 else '')
+    if num < 1_000:        return _ones[num // 100] + ' Hundred' + (' ' + _to_words(num % 100) if num % 100 else '')
+    if num < 100_000:      return _to_words(num // 1_000) + ' Thousand' + (' ' + _to_words(num % 1_000) if num % 1_000 else '')
+    if num < 10_000_000:   return _to_words(num // 100_000) + ' Lakh' + (' ' + _to_words(num % 100_000) if num % 100_000 else '')
+    return _to_words(num // 10_000_000) + ' Crore' + (' ' + _to_words(num % 10_000_000) if num % 10_000_000 else '')
+
+
+def _amount_in_words(amount: float) -> str:
+    rupees = int(amount)
+    paise  = round((amount - rupees) * 100)
+    result = 'Rs. ' + _to_words(rupees)
+    if paise:
+        result += ' And ' + _to_words(paise) + ' Paise'
+    return result + ' Only'
+
+
+def _is_interstate(company_state: str, customer_state: str) -> bool:
+    """Returns True when the two states differ → use IGST."""
+    return (company_state or '').strip().lower() != (customer_state or '').strip().lower()
+
+
+# ── View ──────────────────────────────────────────────────────────────────────
+
 class InvoiceDownloadView(APIView):
+    """
+    GET /invoices/<invoice_id>/download/
+    Renders invoice_pdf.html via WeasyPrint and returns a PDF attachment.
+    """
     authentication_classes = [JWTAuthentication]
     permission_classes     = [IsAuthenticated]
 
     def get(self, request: Request, invoice_id: int):
         company_id = request.user.company_id
 
+        # ── 1. Fetch invoice + customer fields ───────────────────────────────
         inv = query_one(
             """
             SELECT i.*,
@@ -449,21 +492,25 @@ class InvoiceDownloadView(APIView):
                    c.address   AS customer_address,
                    c.city      AS customer_city,
                    c.state     AS customer_state,
+                   c.pincode   AS customer_pincode,
                    c.gstin     AS customer_gstin,
                    c.mobile    AS customer_mobile,
                    c.email     AS customer_email
             FROM   invoices i
             JOIN   customers c ON c.customer_id = i.customer_id
-            WHERE  i.invoice_id = %s AND i.company_id = %s AND i.status = 'A'
+            WHERE  i.invoice_id = %s
+              AND  i.company_id = %s
+              AND  i.status     = 'A'
             """,
-            (invoice_id, company_id)
+            (invoice_id, company_id),
         )
         if not inv:
             return common_response(
                 StatusCode.NOT_FOUND.value,
-                get_message("NOT_FOUND", "Invoice")
+                get_message("NOT_FOUND", "Invoice"),
             )
 
+        # ── 2. Fetch line items ───────────────────────────────────────────────
         items = query_all(
             """
             SELECT ii.*
@@ -471,17 +518,20 @@ class InvoiceDownloadView(APIView):
             WHERE  ii.invoice_id = %s
             ORDER  BY ii.item_id
             """,
-            (invoice_id,)
+            (invoice_id,),
         )
 
+        # ── 3. Fetch company profile ──────────────────────────────────────────
         company = query_one(
             "SELECT * FROM company WHERE company_id = %s",
-            (company_id,)
+            (company_id,),
         ) or {}
 
-        is_tax        = inv.get('invoice_type') == 'TAX'
-        igst_total    = float(inv.get('igst_amount') or 0)
-        is_interstate = is_tax and igst_total > 0
+        # ── 4. Derived flags & amounts ────────────────────────────────────────
+        is_tax       = inv.get('invoice_type') == 'TAX'
+        company_state  = (company.get('state')              or '').strip()
+        customer_state = (inv.get('customer_state')         or '').strip()
+        interstate     = is_tax and _is_interstate(company_state, customer_state)
 
         subtotal    = float(inv.get('subtotal')        or 0)
         cgst        = float(inv.get('cgst_amount')     or 0)
@@ -494,57 +544,99 @@ class InvoiceDownloadView(APIView):
         gst_pct  = float(items[0].get('gst_percentage', 0)) if items else 0
         half_pct = gst_pct / 2
 
-        if is_tax and is_interstate:
-            gst_note = f"IGST {igst:.2f} @ {gst_pct}%  |  THANKS CUSTOMER"
-        elif is_tax:
-            gst_note = (f"GST {subtotal:.2f} * {half_pct}+{half_pct}% = "
-                        f"{cgst:.2f} CGST + {sgst:.2f} SGST  |  THANKS CUSTOMER")
-        else:
-            gst_note = "NON-GST INVOICE  |  THANKS CUSTOMER"
-
-        raw_date = inv.get('invoice_date')
-        if raw_date:
-            date_fmt = (raw_date.strftime('%d/%m/%Y') if hasattr(raw_date, 'strftime')
-                        else str(raw_date))
-        else:
-            date_fmt = ''
-
+        # Per-item helper: half GST for CGST/SGST display
         for item in items:
             item['half_gst_pct'] = float(item.get('gst_percentage', 0)) / 2
 
+        # ── 5. GST note line ──────────────────────────────────────────────────
+        if is_tax and interstate:
+            gst_note = (
+                f"GST {subtotal:.2f} × {gst_pct}% = "
+                f"{igst:.2f} IGST  |  THANKS CUSTOMER"
+            )
+        elif is_tax:
+            gst_note = (
+                f"GST {subtotal:.2f} × {half_pct}+{half_pct}% = "
+                f"{cgst:.2f} CGST + {sgst:.2f} SGST  |  THANKS CUSTOMER"
+            )
+        else:
+            gst_note = "NON-GST INVOICE  |  THANKS CUSTOMER"
+
+        # ── 6. Date formatting ────────────────────────────────────────────────
+        raw_date = inv.get('invoice_date')
+        date_fmt = (
+            raw_date.strftime('%d/%m/%Y')
+            if hasattr(raw_date, 'strftime')
+            else str(raw_date or '')
+        )
+        raw_due = inv.get('due_date')
+        due_fmt = (
+            raw_due.strftime('%d/%m/%Y')
+            if hasattr(raw_due, 'strftime')
+            else str(raw_due or '')
+        )
+
+        # ── 7. Padding rows so table always fills ~12 lines ───────────────────
+        empty_rows = range(max(0, 12 - len(items)))
+
+        # ── 8. Template context ───────────────────────────────────────────────
+        base = os.path.join(settings.BASE_DIR, 'accounts', 'static', 'accounts', 'img')
+        
         context = {
-            'invoice':            inv,
-            'company':            company,
-            'items':              items,
-            'empty_rows':         range(max(0, 12 - len(items))),
-            'is_tax':             is_tax,
-            'is_interstate':      is_interstate,
-            'invoice_type_label': 'TAX Invoice' if is_tax else 'Retail Invoice',
-            'invoice_date_fmt':   date_fmt,
-            'subtotal':           subtotal,
-            'cgst':               cgst,
-            'sgst':               sgst,
-            'igst':               igst,
-            'discount':           discount,
-            'round_off':          round_off,
-            'grand_total':        grand_total,
-            'gst_pct':            gst_pct,
-            'half_gst_pct':       half_pct,
-            'gst_note':           gst_note,
-            'amount_in_words':    _amount_in_words(grand_total),
+            # Core objects
+            'invoice':  inv,
+            'company':  company,
+            'items':    items,
+
+            # Flags
+            'is_tax':        is_tax,
+            'is_interstate': interstate,
+
+            # Labels
+            'invoice_type_label': 'TAX INVOICE' if is_tax else 'RETAIL INVOICE',
+
+            # Formatted dates
+            'invoice_date_fmt': date_fmt,
+            'due_date_fmt':     due_fmt,
+
+            # Numeric totals (plain floats for template arithmetic)
+            'subtotal':    subtotal,
+            'cgst':        cgst,
+            'sgst':        sgst,
+            'igst':        igst,
+            'discount':    discount,
+            'round_off':   round_off,
+            'grand_total': grand_total,
+
+            # GST display helpers
+            'gst_pct':      gst_pct,
+            'half_gst_pct': half_pct,
+            'gst_note':     gst_note,
+
+            # Words
+            'amount_in_words': _amount_in_words(grand_total),
+
+            # Padding
+            'empty_rows': empty_rows,
+
+            # ── Image placeholders (update paths when assets are ready) ──────
+            # Place files under  <project_root>/accounts/static/accounts/img/
+            'signature_img_path': os.path.join(base, 'signature.png'),   # authorised signatory
+            'qr_code_img_path':   os.path.join(base, 'qr_code.png'),     # payment QR
         }
 
+        # ── 9. Render → PDF ───────────────────────────────────────────────────
         try:
-            from weasyprint import HTML
+            from weasyprint import HTML, CSS
             html_string = render_to_string('invoice_pdf.html', context)
             pdf_bytes   = HTML(
                 string=html_string,
-                base_url=request.build_absolute_uri('/')
+                base_url=request.build_absolute_uri('/'),
             ).write_pdf()
-        except Exception as e:
+        except Exception as exc:
             return common_response(
                 StatusCode.INTERNAL_SERVER_ERROR.value,
-                f"PDF generation failed: {str(e)}"
+                f"PDF generation failed: {exc}",
             )
 
         filename = f"{inv.get('invoice_number', invoice_id)}.pdf"
@@ -552,7 +644,6 @@ class InvoiceDownloadView(APIView):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         response['Content-Length']      = len(pdf_bytes)
         return response
-
 
 class DashboardStatsView(generics.GenericAPIView):
     authentication_classes = [JWTAuthentication]
