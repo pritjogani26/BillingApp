@@ -189,7 +189,7 @@ body {
   padding: 5px 10px; min-width: 160px; flex-shrink: 0;
 }
 .for-label { font-size: 7.5pt; font-weight: bold; align-self: flex-end; }
-.sig-space { width: 120px; height: 40px; border-bottom: 1px solid #000; margin: 6px auto 4px; }
+.sig-space { width: 120px; height: 48px; border-bottom: 1.5px solid #000; margin: 6px auto 4px; display: flex; align-items: center; justify-content: center; }
 .auth-label { font-size: 7.5pt; font-weight: bold; text-align: center; width: 100%; }
 `
 
@@ -414,14 +414,16 @@ function InvoiceDocument({
       <div className="bottom-strip">
 
         <div className="bottom-col" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div>
-            <span className="col-title">Bank Details</span>
-            <span className="b-label">Bank Name</span>:&nbsp;{company.bank_name || '—'}<br />
-            <span className="b-label">A/C No.</span>:&nbsp;{company.account_number || '—'}<br />
-            <span className="b-label">IFSC Code</span>:&nbsp;{company.ifsc_code || '—'}<br />
-            <span className="b-label">Branch</span>:&nbsp;{company.city || '—'}<br />
-          </div>
-          {qrCodeBase64 && (
+          {isTax && (
+            <div>
+              <span className="col-title">Bank Details</span>
+              <span className="b-label">Bank Name</span>:&nbsp;{company.bank_name || '—'}<br />
+              <span className="b-label">A/C No.</span>:&nbsp;{company.account_number || '—'}<br />
+              <span className="b-label">IFSC Code</span>:&nbsp;{company.ifsc_code || '—'}<br />
+              <span className="b-label">Branch</span>:&nbsp;{company.city || '—'}<br />
+            </div>
+          )}
+          {isTax && qrCodeBase64 && (
             <div style={{ width: 115, height: 115, border: '1.2px solid #000', padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <img src={qrCodeBase64} style={{ width: '100%', height: '100%', objectFit: 'contain' }} alt="QR Code" />
             </div>
@@ -432,14 +434,15 @@ function InvoiceDocument({
           <span className="col-title">Terms &amp; Conditions</span>
           <ol style={{ paddingLeft: 12, margin: 0, fontSize: '7pt', lineHeight: 1.7 }}>
             <li>Goods once sold will not be taken back or exchanged.</li>
-            <li>Interest @ 1.5% per month will be charged on overdue payments.</li>
-            <li>Subject to Ahmedabad jurisdiction only.</li>
+            <li>Payment must be made within the due date mentioned on the invoice.</li>
+            <li>Interest @ 1.5% per month will be charged on all outstanding amounts remaining unpaid after the due date.</li>
+            <li>All disputes arising out of this invoice shall be subject to Ahmedabad jurisdiction only.</li>
           </ol>
         </div>
 
         <div className="bottom-col sig-col">
           <span className="for-label">For {(company.company_name ?? '').toUpperCase()}</span>
-          <div className="sig-space" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid #000' }}>
+          <div className="sig-space">
             {sigBase64 && (
               <img src={sigBase64} style={{ maxHeight: 38, maxWidth: 120, objectFit: 'contain' }} alt="Signature" />
             )}

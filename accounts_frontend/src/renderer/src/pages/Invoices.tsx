@@ -380,7 +380,7 @@ export default function Invoices() {
     setPayForm({
       amount: String(Number(detailInv.due_amount).toFixed(2)),
       payment_date: new Date().toISOString().slice(0, 10),
-      payment_method: 'CASH',
+      payment_method: 'BANK',
       reference_number: '',
       notes: ''
     })
@@ -451,7 +451,7 @@ export default function Invoices() {
             >
               {getFinancialYearsList().map((fy) => (
                 <option key={fy} value={fy}>
-                  FY {fy} (Mandatory)
+                  FY - {fy}
                 </option>
               ))}
             </select>
@@ -1429,10 +1429,11 @@ export default function Invoices() {
                       value={payForm.payment_method}
                       onChange={(e) => setPayForm({ ...payForm, payment_method: e.target.value })}
                     >
-                      <option value="CASH">Cash</option>
                       <option value="BANK">Bank Transfer</option>
-                      <option value="UPI">UPI</option>
                       <option value="CHEQUE">Cheque</option>
+                      <option value="UPI">UPI</option>
+                      <option value="CASH">Cash</option>
+                      
                     </select>
                   </div>
                   <div className="fgrp">
