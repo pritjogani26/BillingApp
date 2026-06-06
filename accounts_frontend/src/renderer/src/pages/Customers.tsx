@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Search,
   Plus,
@@ -18,7 +19,7 @@ import client from '../api/client'
 
 interface Customer {
   customer_id: number
-  company_name: string
+  customer_name: string
   contact_person: string
   gstin: string
   pan_number: string
@@ -28,13 +29,13 @@ interface Customer {
   pincode: string
   mobile: string
   email: string
-  rate: number | string
+  default_rate: number | string
   status: string
 }
 
 interface LedgerSummary {
   customer_id: number
-  company_name: string
+  customer_name: string
   total_debit: number | string
   total_credit: number | string
   current_balance: number | string
@@ -47,22 +48,19 @@ const inr = (n: number | string | null | undefined) =>
       Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function Customers() {
-  const [customers, setCustomers] = useState<Customer[]>([])
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showLedgerModal, setShowLedgerModal] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
-  const [ledgerSummary, setLedgerSummary] = useState<LedgerSummary | null>(null)
-  const [ledgerLoading, setLedgerLoading] = useState(false)
 
   // Form State
   const initialFormState = {
-    company_name: '',
+    customer_name: '',
     contact_person: '',
     gstin: '',
     pan_number: '',
@@ -72,37 +70,89 @@ export default function Customers() {
     pincode: '',
     mobile: '',
     email: '',
-    rate: '0.00'
+    default_rate: '0.00'
   }
   const [form, setForm] = useState(initialFormState)
   const [formError, setFormError] = useState('')
-  const [formLoading, setFormLoading] = useState(false)
 
-  const fetchCustomers = () => {
-    setLoading(true)
-    client
-      .get(`/customers/?search=${search}`)
-      .then((res) => {
-        if (res.data.success) {
-          setCustomers(res.data.data.customers || [])
-        } else {
-          setError(res.data.message || 'Failed to fetch customers.')
-        }
-      })
-      .catch((err) => {
-        setError(err.response?.data?.message || 'Error connecting to the API server.')
-      })
-      .finally(() => setLoading(false))
-  }
-
-  // Fetch customers on load and when search changes
+  // Debounce search changes
   useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      fetchCustomers()
+    const handler = setTimeout(() => {
+      setDebouncedSearch(search)
     }, 300)
-
-    return () => clearTimeout(delayDebounceFn)
+    return () => clearTimeout(handler)
   }, [search])
+
+  // 1. Fetch Customers list
+  const { data: customersData, isLoading: loadingCustomers, error: customersError } = useQuery({
+    queryKey: ['customers', debouncedSearch],
+    queryFn: async () => {
+      const res = await client.get(`/customers/?search=${debouncedSearch}`)
+      return (res.data.data.customers || []) as Customer[]
+    }
+  })
+
+  // 2. Ledger Summary Query
+  const { data: ledgerData, isLoading: loadingLedger } = useQuery({
+    queryKey: ['ledgerSummary', selectedCustomer?.customer_id],
+    queryFn: async () => {
+      if (!selectedCustomer) return null
+      const res = await client.get(`/customers/${selectedCustomer.customer_id}/summary/`)
+      return res.data.data as LedgerSummary
+    },
+    enabled: showLedgerModal && !!selectedCustomer
+  })
+
+  // 3. Create Customer Mutation
+  const createCustomerMutation = useMutation({
+    mutationFn: async (newCustomer: typeof form) => {
+      const res = await client.post('/customers/', newCustomer)
+      return res.data
+    },
+    onSuccess: () => {
+      setShowAddModal(false)
+      queryClient.invalidateQueries({ queryKey: ['customers'] })
+    },
+    onError: (err: any) => {
+      setFormError(err.response?.data?.message || 'Failed to create customer.')
+    }
+  })
+
+  // 4. Update Customer Mutation
+  const updateCustomerMutation = useMutation({
+    mutationFn: async (updatedData: { id: number; form: typeof form }) => {
+      const res = await client.put(`/customers/${updatedData.id}/`, updatedData.form)
+      return res.data
+    },
+    onSuccess: () => {
+      setShowEditModal(false)
+      queryClient.invalidateQueries({ queryKey: ['customers'] })
+    },
+    onError: (err: any) => {
+      setFormError(err.response?.data?.message || 'Failed to update customer.')
+    }
+  })
+
+  // 5. Delete Customer Mutation
+  const deleteCustomerMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await client.delete(`/customers/${id}/`)
+      return res.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] })
+    },
+    onError: (err: any) => {
+      alert(err.response?.data?.message || 'Failed to delete customer.')
+    }
+  })
+
+  const customers = customersData || []
+  const loading = loadingCustomers
+  const error = customersError ? 'Error connecting to the API server.' : ''
+  const ledgerSummary = ledgerData || null
+  const ledgerLoading = loadingLedger
+  const formLoading = createCustomerMutation.isPending || updateCustomerMutation.isPending
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value })
@@ -115,34 +165,21 @@ export default function Customers() {
     setShowAddModal(true)
   }
 
-  const handleCreateCustomer = async (e: React.FormEvent) => {
+  const handleCreateCustomer = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.company_name.trim()) {
+    if (!form.customer_name.trim()) {
       setFormError('Company Name is required.')
       return
     }
-    setFormLoading(true)
     setFormError('')
-    try {
-      const res = await client.post('/customers/', form)
-      if (res.data.success) {
-        setShowAddModal(false)
-        fetchCustomers()
-      } else {
-        setFormError(res.data.message || 'Failed to create customer.')
-      }
-    } catch (err: any) {
-      setFormError(err.response?.data?.message || 'Error processing request.')
-    } finally {
-      setFormLoading(false)
-    }
+    createCustomerMutation.mutate(form)
   }
 
   const openEditModal = (c: Customer) => {
     setSelectedCustomer(c)
     setForm({
-      company_name: c.company_name,
-      contact_person: c.contact_person,
+      customer_name: c.customer_name,
+      contact_person: c.contact_person || '',
       gstin: c.gstin || '',
       pan_number: c.pan_number || '',
       address: c.address || '',
@@ -151,67 +188,31 @@ export default function Customers() {
       pincode: c.pincode || '',
       mobile: c.mobile || '',
       email: c.email || '',
-      rate: String(c.rate)
+      default_rate: String(c.default_rate)
     })
     setFormError('')
     setShowEditModal(true)
   }
 
-  const handleUpdateCustomer = async (e: React.FormEvent) => {
+  const handleUpdateCustomer = (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedCustomer) return
-    if (!form.company_name.trim()) {
+    if (!form.customer_name.trim()) {
       setFormError('Company Name is required.')
       return
     }
-    setFormLoading(true)
     setFormError('')
-    try {
-      const res = await client.put(`/customers/${selectedCustomer.customer_id}/`, form)
-      if (res.data.success) {
-        setShowEditModal(false)
-        fetchCustomers()
-      } else {
-        setFormError(res.data.message || 'Failed to update customer.')
-      }
-    } catch (err: any) {
-      setFormError(err.response?.data?.message || 'Error updating customer.')
-    } finally {
-      setFormLoading(false)
-    }
+    updateCustomerMutation.mutate({ id: selectedCustomer.customer_id, form })
   }
 
-  const handleDeleteCustomer = async (id: number) => {
+  const handleDeleteCustomer = (id: number) => {
     if (!window.confirm('Are you sure you want to delete this customer?')) return
-    try {
-      const res = await client.delete(`/customers/${id}/`)
-      if (res.data.success) {
-        fetchCustomers()
-      } else {
-        alert(res.data.message || 'Failed to delete customer.')
-      }
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Error deleting customer.')
-    }
+    deleteCustomerMutation.mutate(id)
   }
 
-  const openLedgerSummary = async (c: Customer) => {
+  const openLedgerSummary = (c: Customer) => {
     setSelectedCustomer(c)
-    setLedgerSummary(null)
-    setLedgerLoading(true)
     setShowLedgerModal(true)
-    try {
-      const res = await client.get(`/customers/${c.customer_id}/summary/`)
-      if (res.data.success) {
-        setLedgerSummary(res.data.data)
-      } else {
-        alert(res.data.message || 'Failed to fetch ledger summary.')
-      }
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Error fetching ledger.')
-    } finally {
-      setLedgerLoading(false)
-    }
   }
 
   return (
@@ -284,7 +285,7 @@ export default function Customers() {
                 {customers.map((c) => (
                   <tr key={c.customer_id}>
                     <td>
-                      <div style={{ fontWeight: 600, color: 'var(--t1)' }}>{c.company_name}</div>
+                      <div style={{ fontWeight: 600, color: 'var(--t1)' }}>{c.customer_name}</div>
                       {c.city && c.state && (
                         <div className="fs12 t3 row gap-1" style={{ marginTop: 2 }}>
                           <MapPin size={11} /> {c.city}, {c.state}
@@ -328,7 +329,7 @@ export default function Customers() {
                         <span className="badge badge-red fs12">Unregistered</span>
                       )}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{inr(c.rate)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{inr(c.default_rate)}</td>
                     <td>
                       <span className={`badge ${c.status === 'A' ? 'badge-green' : 'badge-red'}`}>
                         {c.status === 'A' ? 'Active' : 'Inactive'}
@@ -392,8 +393,8 @@ export default function Customers() {
                   <label className="flabel">Company/Party Name *</label>
                   <input
                     className="finput"
-                    name="company_name"
-                    value={form.company_name}
+                    name="customer_name"
+                    value={form.customer_name}
                     onChange={handleInputChange}
                     placeholder="Enter official business name"
                     required
@@ -415,10 +416,10 @@ export default function Customers() {
                     <label className="flabel">Custom Rate (per unit)</label>
                     <input
                       className="finput"
-                      name="rate"
+                      name="default_rate"
                       type="number"
                       step="0.01"
-                      value={form.rate}
+                      value={form.default_rate}
                       onChange={handleInputChange}
                       placeholder="0.00"
                     />
@@ -559,8 +560,8 @@ export default function Customers() {
                   <label className="flabel">Company/Party Name *</label>
                   <input
                     className="finput"
-                    name="company_name"
-                    value={form.company_name}
+                    name="customer_name"
+                    value={form.customer_name}
                     onChange={handleInputChange}
                     placeholder="Enter official business name"
                     required
@@ -582,10 +583,10 @@ export default function Customers() {
                     <label className="flabel">Custom Rate (per unit)</label>
                     <input
                       className="finput"
-                      name="rate"
+                      name="default_rate"
                       type="number"
                       step="0.01"
-                      value={form.rate}
+                      value={form.default_rate}
                       onChange={handleInputChange}
                       placeholder="0.00"
                     />
@@ -742,7 +743,7 @@ export default function Customers() {
                     <div
                       style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: 'var(--t1)' }}
                     >
-                      {ledgerSummary.company_name}
+                      {ledgerSummary.customer_name}
                     </div>
                   </div>
 

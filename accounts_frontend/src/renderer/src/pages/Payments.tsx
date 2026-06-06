@@ -1,6 +1,7 @@
 // src/renderer/src/pages/Payments.tsx
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Search,
   AlertCircle,
@@ -54,26 +55,20 @@ const MethodIcon = ({ method }: { method: string }) => {
 }
 
 export default function Payments() {
-  const [payments, setPayments] = useState<Payment[]>([])
   const [search, setSearch] = useState('')
   const [method, setMethod] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
 
-  const fetchPayments = useCallback(() => {
-    setLoading(true)
-    client
-      .get('/payments/')
-      .then((res) => {
-        if (res.data.success) setPayments(res.data.data.payments || [])
-      })
-      .catch((err) => setError(err.response?.data?.message || 'Failed to load payments.'))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data: paymentsData, isLoading: loadingPayments, error: paymentsError } = useQuery({
+    queryKey: ['payments'],
+    queryFn: async () => {
+      const res = await client.get('/payments/')
+      return (res.data.data.payments || []) as Payment[]
+    }
+  })
 
-  useEffect(() => {
-    fetchPayments()
-  }, [fetchPayments])
+  const payments = paymentsData || []
+  const loading = loadingPayments
+  const error = paymentsError ? 'Failed to load payments.' : ''
 
   const filtered = payments.filter((p) => {
     const q = search.toLowerCase()

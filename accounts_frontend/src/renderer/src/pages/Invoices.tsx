@@ -1,6 +1,7 @@
 // src/renderer/src/pages/Invoices.tsx
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Search, Plus, Eye, X, AlertCircle, FileText, Trash2, CreditCard, Printer, Download } from 'lucide-react'
 import client from '../api/client'
 import InvoicePrint from './InvoicePrint'
@@ -8,14 +9,14 @@ import InvoicePrint from './InvoicePrint'
 /* ── Types ─────────────────────────────────────────── */
 interface Customer {
   customer_id: number
-  company_name: string
+  customer_name: string
   gstin?: string
   state?: string
 }
 interface Product {
   product_id: number
   product_name: string
-  price: number | string
+  unit_price: number | string
   gst_percentage: number | string
   hsn_code?: string
   customer_id?: number | null
@@ -83,23 +84,72 @@ const emptyItem = (): InvoiceItem => ({
   quantity: '1',
   unit_price: '0',
   gst_percentage: '18',
-  hsn_code: ''
+  hsn_code: '94054090'
 })
+
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December'
+]
+
+const getCurrentFinancialYear = () => {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = today.getMonth() + 1
+  const fyStart = month >= 4 ? year : year - 1
+  return `${fyStart}-${String(fyStart + 1).slice(-2)}`
+}
+
+const getFinancialYearsList = () => {
+  const currentFY = getCurrentFinancialYear()
+  const startYear = parseInt(currentFY.split('-')[0])
+  return [
+    `${startYear}-${String(startYear + 1).slice(-2)}`,
+    `${startYear - 1}-${String(startYear).slice(-2)}`,
+    `${startYear - 2}-${String(startYear - 1).slice(-2)}`
+  ]
+}
+
+const getFYDateRange = (fy: string, month: number) => {
+  const startYear = parseInt(fy.split('-')[0])
+  if (month === 0) {
+    const endYear = startYear + 1
+    return {
+      fromDate: `${startYear}-04-01`,
+      toDate: `${endYear}-03-31`
+    }
+  } else {
+    const year = month >= 4 ? startYear : startYear + 1
+    const lastDay = new Date(year, month, 0).getDate()
+    const monthStr = String(month).padStart(2, '0')
+    return {
+      fromDate: `${year}-${monthStr}-01`,
+      toDate: `${year}-${monthStr}-${String(lastDay).padStart(2, '0')}`
+    }
+  }
+}
 
 /* ── Component ─────────────────────────────────────── */
 export default function Invoices() {
-  const [invoices, setInvoices] = useState<Invoice[]>([])
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatus] = useState('')
   const [typeFilter, setType] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
 
   // Modals
   const [showCreate, setShowCreate] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
-  const [detailInv, setDetailInv] = useState<Invoice | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
+  const [activeInvoiceId, setActiveInvoiceId] = useState<number | null>(null)
 
   // Print / PDF preview
   const [printInvId, setPrintInvId] = useState<number | null>(null)
@@ -115,75 +165,126 @@ export default function Invoices() {
     reference_number: '',
     notes: ''
   })
-  const [payLoading, setPayLoading] = useState(false)
   const [payError, setPayError] = useState('')
 
   // Create form
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [products, setProducts] = useState<Product[]>([])
   const [cform, setCform] = useState({
     customer_id: '',
-    invoice_type: 'GST',
+    invoice_type: 'TAX',
     invoice_date: new Date().toISOString().slice(0, 10),
     discount_amount: '0',
     notes: ''
   })
   const [items, setItems] = useState<InvoiceItem[]>([emptyItem()])
   const [cformError, setCformError] = useState('')
-  const [cformLoading, setCformLoading] = useState(false)
 
-  /* Fetch invoices */
-  const fetchInvoices = useCallback(() => {
-    setLoading(true)
-    const params = new URLSearchParams()
-    if (statusFilter) params.set('payment_status', statusFilter)
-    if (typeFilter) params.set('invoice_type', typeFilter)
-    client
-      .get(`/invoices/?${params}`)
-      .then((res) => {
-        if (res.data.success) setInvoices(res.data.data.invoices || [])
-      })
-      .catch((err) => setError(err.response?.data?.message || 'Failed to load invoices.'))
-      .finally(() => setLoading(false))
-  }, [statusFilter, typeFilter])
+  const [fyFilter, setFyFilter] = useState(getCurrentFinancialYear())
+  const [monthFilter, setMonthFilter] = useState<number>(new Date().getMonth() + 1)
 
-  useEffect(() => {
-    fetchInvoices()
-  }, [fetchInvoices])
+  const { fromDate, toDate } = getFYDateRange(fyFilter, monthFilter)
+
+  // Queries
+  const { data: invoicesData, isLoading: loadingInvoices, error: invoicesError } = useQuery({
+    queryKey: ['invoices', statusFilter, typeFilter, fromDate, toDate],
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (statusFilter) params.set('payment_status', statusFilter)
+      if (typeFilter) params.set('invoice_type', typeFilter)
+      if (fromDate) params.set('from_date', fromDate)
+      if (toDate) params.set('to_date', toDate)
+      const res = await client.get(`/invoices/?${params}`)
+      return (res.data.data.invoices || []) as Invoice[]
+    }
+  })
+
+  const { data: dropdownCustomersData } = useQuery({
+    queryKey: ['customersDropdown'],
+    queryFn: async () => {
+      const res = await client.get('/customers/?search=')
+      return (res.data.data.customers || []) as Customer[]
+    },
+    enabled: showCreate
+  })
+
+  const { data: dropdownProductsData } = useQuery({
+    queryKey: ['productsDropdown'],
+    queryFn: async () => {
+      const res = await client.get('/products/?search=')
+      return (res.data.data.products || []) as Product[]
+    },
+    enabled: showCreate
+  })
+
+  const { data: detailInvData, isLoading: detailLoading } = useQuery({
+    queryKey: ['invoiceDetail', activeInvoiceId],
+    queryFn: async () => {
+      if (!activeInvoiceId) return null
+      const res = await client.get(`/invoices/${activeInvoiceId}/`)
+      return res.data.data as Invoice
+    },
+    enabled: !!activeInvoiceId
+  })
+
+  const invoices = invoicesData || []
+  const loading = loadingInvoices
+  const error = invoicesError ? 'Failed to load invoices.' : ''
+
+  const customers = dropdownCustomersData || []
+  const products = dropdownProductsData || []
+  const detailInv = detailInvData || null
+
+  // Mutations
+  const createInvoiceMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await client.post('/invoices/', payload)
+      return res.data
+    },
+    onSuccess: () => {
+      setShowCreate(false)
+      queryClient.invalidateQueries({ queryKey: ['invoices'] })
+    },
+    onError: (err: any) => {
+      setCformError(err.response?.data?.message || 'Error creating invoice.')
+    }
+  })
+
+  const createPaymentMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await client.post('/payments/', payload)
+      return res.data
+    },
+    onSuccess: () => {
+      setShowPay(false)
+      setShowDetail(false)
+      setActiveInvoiceId(null)
+      queryClient.invalidateQueries({ queryKey: ['invoices'] })
+    },
+    onError: (err: any) => {
+      setPayError(err.response?.data?.message || 'Error recording payment.')
+    }
+  })
+
+  const cformLoading = createInvoiceMutation.isPending
+  const payLoading = createPaymentMutation.isPending
 
   /* Load dropdowns when create modal opens */
-  const openCreate = async () => {
+  const openCreate = () => {
     setItems([emptyItem()])
     setCform({
       customer_id: '',
-      invoice_type: 'GST',
+      invoice_type: 'TAX',
       invoice_date: new Date().toISOString().slice(0, 10),
       discount_amount: '0',
       notes: ''
     })
     setCformError('')
-    if (!customers.length) {
-      const r = await client.get('/customers/?search=')
-      if (r.data.success) setCustomers(r.data.data.customers || [])
-    }
-    if (!products.length) {
-      const r = await client.get('/products/?search=')
-      if (r.data.success) setProducts(r.data.data.products || [])
-    }
     setShowCreate(true)
   }
 
   /* View detail */
-  const openDetail = async (inv: Invoice) => {
-    setDetailInv(inv)
-    setDetailLoading(true)
+  const openDetail = (inv: Invoice) => {
+    setActiveInvoiceId(inv.invoice_id)
     setShowDetail(true)
-    try {
-      const r = await client.get(`/invoices/${inv.invoice_id}/`)
-      if (r.data.success) setDetailInv(r.data.data)
-    } finally {
-      setDetailLoading(false)
-    }
   }
 
   /* Item helpers */
@@ -201,9 +302,9 @@ export default function Invoices() {
             ...next[idx],
             product_id: prod.product_id,
             product_name: prod.product_name,
-            unit_price: String(prod.price ?? 0),
+            unit_price: String(prod.unit_price ?? 0),
             gst_percentage: String(prod.gst_percentage ?? 18),
-            hsn_code: prod.hsn_code ?? ''
+            hsn_code: prod.hsn_code || '94054090'
           }
         } else {
           next[idx] = {
@@ -224,7 +325,7 @@ export default function Invoices() {
   const calcLine = (it: InvoiceItem) => {
     const qty = Number(it.quantity) || 0,
       up = Number(it.unit_price) || 0,
-      gst = Number(it.gst_percentage) || 0
+      gst = cform.invoice_type === 'TAX' ? 18 : (Number(it.gst_percentage) || 0)
     const taxable = qty * up
     const half = gst / 2
     const cgst = +((taxable * half) / 100).toFixed(2)
@@ -248,7 +349,7 @@ export default function Invoices() {
   const grandTotal = totals.total - disc
 
   /* Submit create */
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
     if (!cform.customer_id) {
       setCformError('Please select a customer.')
@@ -258,29 +359,19 @@ export default function Invoices() {
       setCformError('Please enter a product name or select a product for all line items.')
       return
     }
-    setCformLoading(true)
     setCformError('')
-    try {
-      const payload = {
-        ...cform,
-        items: items.map((it) => ({
-          product_id: it.product_id ? it.product_id : null,
-          product_name: it.product_name,
-          quantity: it.quantity,
-          unit_price: it.unit_price,
-          gst_percentage: it.gst_percentage
-        }))
-      }
-      const res = await client.post('/invoices/', payload)
-      if (res.data.success) {
-        setShowCreate(false)
-        fetchInvoices()
-      } else setCformError(res.data.message || 'Failed to create invoice.')
-    } catch (err: any) {
-      setCformError(err.response?.data?.message || 'Error creating invoice.')
-    } finally {
-      setCformLoading(false)
+    const payload = {
+      ...cform,
+      items: items.map((it) => ({
+        product_id: it.product_id ? it.product_id : null,
+        product_name: it.product_name,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        gst_percentage: cform.invoice_type === 'TAX' ? '18' : it.gst_percentage,
+        hsn_code: it.hsn_code || null
+      }))
     }
+    createInvoiceMutation.mutate(payload)
   }
 
   /* Open payment dialog */
@@ -298,27 +389,18 @@ export default function Invoices() {
   }
 
   /* Submit payment */
-  const handlePay = async (e: React.FormEvent) => {
+  const handlePay = (e: React.FormEvent) => {
     e.preventDefault()
     if (!detailInv) return
     if (!payForm.amount || Number(payForm.amount) <= 0) {
       setPayError('Enter a valid amount.')
       return
     }
-    setPayLoading(true)
     setPayError('')
-    try {
-      const res = await client.post('/payments/', { invoice_id: detailInv.invoice_id, ...payForm })
-      if (res.data.success) {
-        setShowPay(false)
-        setShowDetail(false)
-        fetchInvoices()
-      } else setPayError(res.data.message || 'Payment failed.')
-    } catch (err: any) {
-      setPayError(err.response?.data?.message || 'Error recording payment.')
-    } finally {
-      setPayLoading(false)
-    }
+    createPaymentMutation.mutate({
+      invoice_id: detailInv.invoice_id,
+      ...payForm
+    })
   }
 
   /* ── Filtered display ── */
@@ -336,7 +418,9 @@ export default function Invoices() {
       <div className="page-hdr">
         <div>
           <div className="page-title">Invoices</div>
-          <div className="page-sub">Create GST/Non-GST invoices and track payment status.</div>
+          <div className="page-sub">
+            Create GST/Non-GST invoices and track payment status. Defaults to the current month and the mandatory current Financial Year. Selecting a month displays invoices for that month, while clearing the month filter (selecting 'All Months') displays all invoices for the entire selected Financial Year.
+          </div>
         </div>
         <div className="page-hdr-actions">
           <button className="btn btn-primary" onClick={openCreate}>
@@ -361,6 +445,31 @@ export default function Invoices() {
           <div className="row gap-2">
             <select
               className="finput"
+              style={{ width: 160, padding: '7px 10px' }}
+              value={fyFilter}
+              onChange={(e) => setFyFilter(e.target.value)}
+            >
+              {getFinancialYearsList().map((fy) => (
+                <option key={fy} value={fy}>
+                  FY {fy} (Mandatory)
+                </option>
+              ))}
+            </select>
+            <select
+              className="finput"
+              style={{ width: 140, padding: '7px 10px' }}
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(Number(e.target.value))}
+            >
+              <option value="0">All Months</option>
+              {MONTHS.map((m, i) => (
+                <option key={i} value={i + 1}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <select
+              className="finput"
               style={{ width: 140, padding: '7px 10px' }}
               value={statusFilter}
               onChange={(e) => setStatus(e.target.value)}
@@ -377,8 +486,8 @@ export default function Invoices() {
               onChange={(e) => setType(e.target.value)}
             >
               <option value="">All Types</option>
-              <option value="GST">GST</option>
-              <option value="NON_GST">Non-GST</option>
+              <option value="TAX">TAX</option>
+              <option value="RETAIL">RETAIL</option>
             </select>
           </div>
           <span className="fs12 t3 fw6">{displayed.length} Invoice(s)</span>
@@ -437,7 +546,7 @@ export default function Invoices() {
                     <td className="t2 fs12">{fmt(inv.invoice_date)}</td>
                     <td>
                       <span
-                        className={`badge ${inv.invoice_type === 'GST' ? 'badge-blue' : 'badge-yellow'}`}
+                        className={`badge ${inv.invoice_type === 'TAX' ? 'badge-blue' : 'badge-yellow'}`}
                       >
                         {inv.invoice_type}
                       </span>
@@ -501,7 +610,7 @@ export default function Invoices() {
       {/* ── Create Invoice Modal ── */}
       {showCreate && (
         <div className="overlay">
-          <div className="modal" style={{ width: 780, maxWidth: '97vw' }}>
+          <div className="modal" style={{ width: 860, maxWidth: '97vw' }}>
             <div className="modal-hdr">
               <span className="modal-title">Create New Invoice</span>
               <button className="tb-btn" onClick={() => setShowCreate(false)}>
@@ -529,7 +638,7 @@ export default function Invoices() {
                       <option value="">— Select Customer —</option>
                       {customers.map((c) => (
                         <option key={c.customer_id} value={c.customer_id}>
-                          {c.company_name}
+                          {c.customer_name}
                         </option>
                       ))}
                     </select>
@@ -541,8 +650,8 @@ export default function Invoices() {
                       value={cform.invoice_type}
                       onChange={(e) => setCform({ ...cform, invoice_type: e.target.value })}
                     >
-                      <option value="GST">GST</option>
-                      <option value="NON_GST">Non-GST</option>
+                      <option value="TAX">TAX</option>
+                      <option value="RETAIL">RETAIL</option>
                     </select>
                   </div>
                   <div className="fgrp">
@@ -602,6 +711,20 @@ export default function Invoices() {
                             }}
                           >
                             Product
+                          </th>
+                          <th
+                            style={{
+                              padding: '7px 10px',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: 'var(--t3)',
+                              textAlign: 'left',
+                              letterSpacing: '.5px',
+                              textTransform: 'uppercase',
+                              width: 100
+                            }}
+                          >
+                            HSN Code
                           </th>
                           <th
                             style={{
@@ -690,6 +813,16 @@ export default function Invoices() {
                                   </datalist>
                                 )}
                               </td>
+                              <td style={{ padding: '6px 8px', width: 100 }}>
+                                <input
+                                  type="text"
+                                  className="finput"
+                                  style={{ padding: '5px 8px', fontSize: 13 }}
+                                  placeholder="HSN Code"
+                                  value={it.hsn_code || ''}
+                                  onChange={(e) => updateItem(idx, 'hsn_code', e.target.value)}
+                                />
+                              </td>
                               <td style={{ padding: '6px 8px' }}>
                                 <input
                                   className="finput"
@@ -714,7 +847,8 @@ export default function Invoices() {
                                 <select
                                   className="finput"
                                   style={{ padding: '5px 8px', fontSize: 13, textAlign: 'right' }}
-                                  value={it.gst_percentage}
+                                  value={cform.invoice_type === 'TAX' ? '18' : it.gst_percentage}
+                                  disabled={cform.invoice_type === 'TAX'}
                                   onChange={(e) => updateItem(idx, 'gst_percentage', e.target.value)}
                                 >
                                   <option value="0">0%</option>
@@ -789,7 +923,7 @@ export default function Invoices() {
                         <span className="t2">Subtotal</span>
                         <span className="fw6">{inr(totals.subtotal)}</span>
                       </div>
-                      {cform.invoice_type === 'GST' && (
+                      {cform.invoice_type === 'TAX' && (
                         <>
                           <div className="row jc-sb" style={{ marginBottom: 6 }}>
                             <span className="t2">CGST</span>
@@ -801,25 +935,6 @@ export default function Invoices() {
                           </div>
                         </>
                       )}
-                      <div className="row jc-sb" style={{ marginBottom: 6 }}>
-                        <span className="t2">Discount (₹)</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={cform.discount_amount}
-                          onChange={(e) => setCform({ ...cform, discount_amount: e.target.value })}
-                          style={{
-                            width: 80,
-                            textAlign: 'right',
-                            border: '1px solid var(--border)',
-                            borderRadius: 4,
-                            padding: '2px 6px',
-                            fontSize: 13,
-                            background: '#fff',
-                            color: 'var(--t1)'
-                          }}
-                        />
-                      </div>
                       <div
                         style={{
                           borderTop: '1px solid var(--border)',
@@ -873,7 +988,10 @@ export default function Invoices() {
                 )}
                 <button
                   className="tb-btn"
-                  onClick={() => setShowDetail(false)}
+                  onClick={() => {
+                    setShowDetail(false)
+                    setActiveInvoiceId(null)
+                  }}
                   style={{ color: '#8898AA' }}
                 >
                   <X size={15} />
@@ -1225,7 +1343,13 @@ export default function Invoices() {
               )}
             </div>
             <div className="modal-ftr">
-              <button className="btn btn-outline" onClick={() => setShowDetail(false)}>
+              <button
+                className="btn btn-outline"
+                onClick={() => {
+                  setShowDetail(false)
+                  setActiveInvoiceId(null)
+                }}
+              >
                 Close
               </button>
             </div>

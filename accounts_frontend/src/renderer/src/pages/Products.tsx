@@ -1,6 +1,7 @@
 // src/renderer/src/pages/Products.tsx
 
 import React, { useState, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Search, Plus, Edit3, Trash2, X, AlertCircle, Package } from 'lucide-react'
 import client from '../api/client'
 
@@ -12,7 +13,7 @@ interface Product {
   gst_percentage: number | string
   height: number | string
   width: number | string
-  price: number | string
+  unit_price: number | string
   description: string
   status: string
 }
@@ -26,19 +27,18 @@ const inr = (n: number | string | null | undefined) =>
 const initialForm = {
   customer_id: '',
   product_name: '',
-  hsn_code: '',
+  hsn_code: '94054090',
   gst_percentage: '18.00',
   height: '0.00',
   width: '0.00',
-  price: '0.00',
+  unit_price: '0.00',
   description: ''
 }
 
 export default function Products() {
-  const [products, setProducts] = useState<Product[]>([])
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -46,51 +46,92 @@ export default function Products() {
 
   const [form, setForm] = useState(initialForm)
   const [formError, setFormError] = useState('')
-  const [formLoading, setFormLoading] = useState(false)
 
-  const [customers, setCustomers] = useState<any[]>([])
-
-  const fetchCustomers = () => {
-    client
-      .get('/customers/?search=')
-      .then((res) => {
-        if (res.data.success) {
-          setCustomers(res.data.data.customers || [])
-        }
-      })
-      .catch(console.error)
-  }
-
-  const fetchProducts = () => {
-    setLoading(true)
-    client
-      .get(`/products/?search=${search}`)
-      .then((res) => {
-        if (res.data.success) setProducts(res.data.data.products || [])
-        else setError(res.data.message || 'Failed to fetch products.')
-      })
-      .catch((err) => setError(err.response?.data?.message || 'Error connecting to server.'))
-      .finally(() => setLoading(false))
-  }
-
+  // Debounce search changes
   useEffect(() => {
-    fetchCustomers()
-  }, [])
-
-  useEffect(() => {
-    const t = setTimeout(fetchProducts, 300)
-    return () => clearTimeout(t)
+    const handler = setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 300)
+    return () => clearTimeout(handler)
   }, [search])
+
+  // 1. Fetch Products
+  const { data: productsData, isLoading: loadingProducts, error: productsError } = useQuery({
+    queryKey: ['products', debouncedSearch],
+    queryFn: async () => {
+      const res = await client.get(`/products/?search=${debouncedSearch}`)
+      return (res.data.data.products || []) as Product[]
+    }
+  })
+
+  // 2. Fetch Customers for Dropdown
+  const { data: customersData } = useQuery({
+    queryKey: ['customersDropdown'],
+    queryFn: async () => {
+      const res = await client.get('/customers/?search=')
+      return (res.data.data.customers || []) as any[]
+    }
+  })
+
+  // 3. Create Product Mutation
+  const createProductMutation = useMutation({
+    mutationFn: async (newProduct: typeof form) => {
+      const res = await client.post('/products/', newProduct)
+      return res.data
+    },
+    onSuccess: () => {
+      setShowAddModal(false)
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    },
+    onError: (err: any) => {
+      setFormError(err.response?.data?.message || 'Failed to create product.')
+    }
+  })
+
+  // 4. Update Product Mutation
+  const updateProductMutation = useMutation({
+    mutationFn: async (updatedData: { id: number; form: typeof form }) => {
+      const res = await client.put(`/products/${updatedData.id}/`, updatedData.form)
+      return res.data
+    },
+    onSuccess: () => {
+      setShowEditModal(false)
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    },
+    onError: (err: any) => {
+      setFormError(err.response?.data?.message || 'Failed to update product.')
+    }
+  })
+
+  // 5. Delete Product Mutation
+  const deleteProductMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await client.delete(`/products/${id}/`)
+      return res.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    },
+    onError: (err: any) => {
+      alert(err.response?.data?.message || 'Failed to delete product.')
+    }
+  })
+
+  const products = productsData || []
+  const loading = loadingProducts
+  const error = productsError ? 'Error connecting to server.' : ''
+  const customers = customersData || []
+  const formLoading = createProductMutation.isPending || updateProductMutation.isPending
 
   // Reactive price calculations: height * width * customer_rate
   useEffect(() => {
     const h = parseFloat(form.height) || 0
     const w = parseFloat(form.width) || 0
     const selectedCust = customers.find((c) => String(c.customer_id) === form.customer_id)
-    const rate = selectedCust ? parseFloat(String(selectedCust.rate)) || 0 : 0
+    const rate = selectedCust ? parseFloat(String(selectedCust.default_rate)) || 0 : 0
     if (h > 0 && w > 0 && rate > 0) {
       const calculatedPrice = ((h * w * rate)/100)
-      setForm((prev) => ({ ...prev, price: calculatedPrice.toFixed(2) }))
+      setForm((prev) => ({ ...prev, unit_price: calculatedPrice.toFixed(2) }))
     }
   }, [form.height, form.width, form.customer_id, customers])
 
@@ -116,14 +157,14 @@ export default function Products() {
       gst_percentage: String(p.gst_percentage),
       height: String(p.height),
       width: String(p.width),
-      price: String(p.price),
+      unit_price: String(p.unit_price),
       description: p.description || ''
     })
     setFormError('')
     setShowEditModal(true)
   }
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.customer_id) {
       setFormError('Customer selection is required.')
@@ -133,22 +174,11 @@ export default function Products() {
       setFormError('Product name is required.')
       return
     }
-    setFormLoading(true)
     setFormError('')
-    try {
-      const res = await client.post('/products/', form)
-      if (res.data.success) {
-        setShowAddModal(false)
-        fetchProducts()
-      } else setFormError(res.data.message || 'Failed to create product.')
-    } catch (err: any) {
-      setFormError(err.response?.data?.message || 'Error processing request.')
-    } finally {
-      setFormLoading(false)
-    }
+    createProductMutation.mutate(form)
   }
 
-  const handleUpdate = async (e: React.FormEvent) => {
+  const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault()
     if (!selected) return
     if (!form.customer_id) {
@@ -159,30 +189,13 @@ export default function Products() {
       setFormError('Product name is required.')
       return
     }
-    setFormLoading(true)
     setFormError('')
-    try {
-      const res = await client.put(`/products/${selected.product_id}/`, form)
-      if (res.data.success) {
-        setShowEditModal(false)
-        fetchProducts()
-      } else setFormError(res.data.message || 'Failed to update product.')
-    } catch (err: any) {
-      setFormError(err.response?.data?.message || 'Error updating product.')
-    } finally {
-      setFormLoading(false)
-    }
+    updateProductMutation.mutate({ id: selected.product_id, form })
   }
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = (id: number) => {
     if (!window.confirm('Delete this product?')) return
-    try {
-      const res = await client.delete(`/products/${id}/`)
-      if (res.data.success) fetchProducts()
-      else alert(res.data.message || 'Failed to delete.')
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Error deleting product.')
-    }
+    deleteProductMutation.mutate(id)
   }
 
   const renderFormBody = () => (
@@ -206,7 +219,7 @@ export default function Products() {
           <option value="">— Select Customer —</option>
           {customers.map((c) => (
             <option key={c.customer_id} value={c.customer_id}>
-              {c.company_name} (Rate: ₹{parseFloat(c.rate).toFixed(2)}/sq ft)
+              {c.customer_name} (Rate: ₹{parseFloat(c.default_rate).toFixed(2)}/sq ft)
             </option>
           ))}
         </select>
@@ -278,10 +291,10 @@ export default function Products() {
           <label className="flabel">Unit Price (₹) *</label>
           <input
             className="finput"
-            name="price"
+            name="unit_price"
             type="number"
             step="0.01"
-            value={form.price}
+            value={form.unit_price}
             onChange={handleInput}
             placeholder="0.00"
             readOnly
@@ -397,7 +410,7 @@ export default function Products() {
                         <span className="t3 fs12">—</span>
                       )}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{inr(p.price)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{inr(p.unit_price)}</td>
                     <td style={{ textAlign: 'right' }}>
                       <span className="badge badge-yellow">
                         {Number(p.gst_percentage).toFixed(1)}%

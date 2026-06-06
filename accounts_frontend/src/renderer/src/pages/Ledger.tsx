@@ -1,12 +1,13 @@
 // src/renderer/src/pages/Ledger.tsx
 
 import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Search, AlertCircle, BookOpen, TrendingDown, ChevronRight } from 'lucide-react'
 import client from '../api/client'
 
 interface OutstandingRow {
   customer_id: number
-  company_name: string
+  customer_name: string
   mobile: string
   outstanding: number | string
   pending_invoices: number
@@ -20,13 +21,13 @@ interface LedgerEntry {
   transaction_date: string
   debit_amount: number | string
   credit_amount: number | string
-  balance_after_transaction: number | string
+  running_balance: number | string
   remarks: string
 }
 
 interface CustomerInfo {
   customer_id: number
-  company_name: string
+  customer_name: string
   mobile: string
   city?: string
   state?: string
@@ -45,79 +46,92 @@ type Tab = 'outstanding' | 'ledger'
 
 export default function Ledger() {
   const [tab, setTab] = useState<Tab>('outstanding')
-  const [outstanding, setOutstanding] = useState<OutstandingRow[]>([])
-  const [outLoading, setOutLoading] = useState(true)
-  const [outError, setOutError] = useState('')
-
-  // Ledger drill-down state
   const [search, setSearch] = useState('')
-  const [customers, setCustomers] = useState<CustomerInfo[]>([])
-  const [custLoading, setCustLoading] = useState(false)
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [selectedCust, setSelectedCust] = useState<CustomerInfo | null>(null)
-  const [entries, setEntries] = useState<LedgerEntry[]>([])
-  const [entriesLoading, setEntriesLoading] = useState(false)
-  const [entriesError, setEntriesError] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [submittedFromDate, setSubmittedFromDate] = useState('')
+  const [submittedToDate, setSubmittedToDate] = useState('')
 
-  /* Load outstanding report on mount */
+  // Debounce search changes
   useEffect(() => {
-    client
-      .get('/ledger/outstanding/')
-      .then((res) => {
-        if (res.data.success) setOutstanding(res.data.data.outstanding || [])
-      })
-      .catch((err) => setOutError(err.response?.data?.message || 'Failed to load outstanding.'))
-      .finally(() => setOutLoading(false))
-  }, [])
+    const handler = setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 300)
+    return () => clearTimeout(handler)
+  }, [search])
 
-  /* Load customers for ledger search */
-  useEffect(() => {
-    if (tab !== 'ledger') return
-    setCustLoading(true)
-    client
-      .get(`/customers/?search=${search}`)
-      .then((res) => {
-        if (res.data.success) setCustomers(res.data.data.customers || [])
-      })
-      .finally(() => setCustLoading(false))
-  }, [tab, search])
+  // Queries
+  const { data: outstandingData, isLoading: outLoading, error: outErrorQuery } = useQuery({
+    queryKey: ['ledgerOutstanding'],
+    queryFn: async () => {
+      const res = await client.get('/ledger/outstanding/')
+      return (res.data.data.outstanding || []) as OutstandingRow[]
+    },
+    enabled: tab === 'outstanding'
+  })
 
-  /* Load ledger entries for selected customer */
-  const loadEntries = (cust: CustomerInfo) => {
+  const { data: customersData, isLoading: custLoading } = useQuery({
+    queryKey: ['ledgerCustomers', debouncedSearch],
+    queryFn: async () => {
+      const res = await client.get(`/customers/?search=${debouncedSearch}`)
+      return (res.data.data.customers || []) as CustomerInfo[]
+    },
+    enabled: tab === 'ledger'
+  })
+
+  const { data: entriesData, isLoading: entriesLoading, error: entriesErrorQuery } = useQuery({
+    queryKey: ['ledgerEntries', selectedCust?.customer_id, submittedFromDate, submittedToDate],
+    queryFn: async () => {
+      if (!selectedCust) return []
+      const params = new URLSearchParams()
+      if (submittedFromDate) params.set('from_date', submittedFromDate)
+      if (submittedToDate) params.set('to_date', submittedToDate)
+      const res = await client.get(`/ledger/${selectedCust.customer_id}/?${params}`)
+      return (res.data.data.entries || []) as LedgerEntry[]
+    },
+    enabled: tab === 'ledger' && !!selectedCust
+  })
+
+  const outstanding = outstandingData || []
+  const customers = customersData || []
+  const entries = entriesData || []
+
+  const outError = outErrorQuery ? 'Failed to load outstanding.' : ''
+  const entriesError = entriesErrorQuery ? 'Failed to load ledger entries.' : ''
+
+  const selectCustomer = (cust: CustomerInfo) => {
     setSelectedCust(cust)
-    setEntries([])
-    setEntriesError('')
-    setEntriesLoading(true)
-    const params = new URLSearchParams()
-    if (fromDate) params.set('from_date', fromDate)
-    if (toDate) params.set('to_date', toDate)
-    client
-      .get(`/ledger/${cust.customer_id}/?${params}`)
-      .then((res) => {
-        if (res.data.success) setEntries(res.data.data.entries || [])
-      })
-      .catch((err) =>
-        setEntriesError(err.response?.data?.message || 'Failed to load ledger entries.')
-      )
-      .finally(() => setEntriesLoading(false))
+    setFromDate('')
+    setToDate('')
+    setSubmittedFromDate('')
+    setSubmittedToDate('')
   }
 
-  /* Open ledger for a specific customer (from outstanding tab) */
+  const handleFilter = () => {
+    setSubmittedFromDate(fromDate)
+    setSubmittedToDate(toDate)
+  }
+
   const drillDown = (row: OutstandingRow) => {
     setTab('ledger')
-    setSearch(row.company_name)
+    setSearch(row.customer_name)
     const mock: CustomerInfo = {
       customer_id: row.customer_id,
-      company_name: row.company_name,
+      customer_name: row.customer_name,
       mobile: row.mobile
     }
-    setTimeout(() => loadEntries(mock), 300)
+    setSelectedCust(mock)
+    setFromDate('')
+    setToDate('')
+    setSubmittedFromDate('')
+    setSubmittedToDate('')
   }
 
   const totalOutstanding = outstanding.reduce((s, r) => s + Number(r.outstanding), 0)
   const filteredCusts = customers.filter(
-    (c) => !search || c.company_name.toLowerCase().includes(search.toLowerCase())
+    (c) => !search || c.customer_name.toLowerCase().includes(search.toLowerCase())
   )
 
   return (
@@ -232,7 +246,7 @@ export default function Ledger() {
                       .sort((a, b) => Number(b.outstanding) - Number(a.outstanding))
                       .map((r) => (
                         <tr key={r.customer_id}>
-                          <td style={{ fontWeight: 600 }}>{r.company_name}</td>
+                          <td style={{ fontWeight: 600 }}>{r.customer_name}</td>
                           <td className="t2 fs12">{r.mobile || '—'}</td>
                           <td style={{ textAlign: 'right' }}>
                             <span className="badge badge-yellow">
@@ -311,7 +325,7 @@ export default function Ledger() {
                 filteredCusts.map((c) => (
                   <div
                     key={c.customer_id}
-                    onClick={() => loadEntries(c)}
+                    onClick={() => selectCustomer(c)}
                     style={{
                       padding: '10px 16px',
                       cursor: 'pointer',
@@ -327,7 +341,7 @@ export default function Ledger() {
                       transition: 'background 0.1s'
                     }}
                   >
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{c.company_name}</div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{c.customer_name}</div>
                     {c.mobile && (
                       <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 2 }}>
                         {c.mobile}
@@ -360,7 +374,7 @@ export default function Ledger() {
                 >
                   <div>
                     <div className="card-title" style={{ color: '#fff' }}>
-                      {selectedCust.company_name}
+                      {selectedCust.customer_name}
                     </div>
                     {selectedCust.mobile && (
                       <div style={{ fontSize: 11, color: '#4A6080', marginTop: 2 }}>
@@ -388,7 +402,7 @@ export default function Ledger() {
                     />
                     <button
                       className="btn btn-primary btn-sm"
-                      onClick={() => loadEntries(selectedCust)}
+                      onClick={handleFilter}
                     >
                       Filter
                     </button>
@@ -476,12 +490,12 @@ export default function Ledger() {
                                   fontWeight: 700,
                                   fontVariantNumeric: 'tabular-nums',
                                   color:
-                                    Number(e.balance_after_transaction) > 0
+                                    Number(e.running_balance) > 0
                                       ? 'var(--danger)'
                                       : 'var(--success)'
                                 }}
                               >
-                                {inr(e.balance_after_transaction)}
+                                {inr(e.running_balance)}
                               </td>
                             </tr>
                           ))}
@@ -519,12 +533,12 @@ export default function Ledger() {
                               fontWeight: 800,
                               fontSize: 15,
                               color:
-                                Number(entries[entries.length - 1]?.balance_after_transaction) > 0
+                                Number(entries[entries.length - 1]?.running_balance) > 0
                                   ? 'var(--danger)'
                                   : 'var(--success)'
                             }}
                           >
-                            {inr(entries[entries.length - 1]?.balance_after_transaction)}
+                            {inr(entries[entries.length - 1]?.running_balance)}
                           </span>
                         </div>
                       </div>

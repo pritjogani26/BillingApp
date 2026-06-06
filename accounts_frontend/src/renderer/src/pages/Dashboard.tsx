@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   FileText,
@@ -75,22 +75,26 @@ interface DashboardStats {
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [invoices, setInvoices] = useState<Invoice[]>([])
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    Promise.all([
-      client.get('/invoices/dashboard/'),
-      client.get('/invoices/?payment_status=PENDING')
-    ])
-      .then(([s, inv]) => {
-        if (s.data.success) setStats(s.data.data)
-        if (inv.data.success) setInvoices((inv.data.data.invoices || []).slice(0, 8))
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
+  const { data: statsData, isLoading: loadingStats } = useQuery({
+    queryKey: ['dashboardStats'],
+    queryFn: async () => {
+      const res = await client.get('/invoices/dashboard/')
+      return res.data.data as DashboardStats
+    }
+  })
+
+  const { data: invoicesData, isLoading: loadingInvoices } = useQuery({
+    queryKey: ['pendingInvoices'],
+    queryFn: async () => {
+      const res = await client.get('/invoices/?payment_status=PENDING')
+      return (res.data.data.invoices || []) as Invoice[]
+    }
+  })
+
+  const loading = loadingStats || loadingInvoices
+  const stats = statsData || null
+  const invoices = (invoicesData || []).slice(0, 8)
 
   return (
     <>

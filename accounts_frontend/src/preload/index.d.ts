@@ -2,8 +2,22 @@ import { ElectronAPI } from '@electron-toolkit/preload'
 
 declare global {
   interface Window {
-    electron: ElectronAPI
-    api: unknown
+    electron: ElectronAPI & {
+      ipcRenderer: {
+        invoke(channel: string, ...args: unknown[]): Promise<unknown>
+        send(channel: string, ...args: unknown[]): void
+        on(channel: string, callback: (...args: unknown[]) => void): void
+        removeAllListeners(channel: string): void
+      }
+    }
+    api: {
+      ipcRenderer: {
+        invoke(channel: string, ...args: unknown[]): Promise<unknown>
+        send(channel: string, ...args: unknown[]): void
+        on(channel: string, callback: (...args: unknown[]) => void): void
+        removeAllListeners(channel: string): void
+      }
+    }
     electronAPI: {
       minimize: () => void
       maximize: () => void

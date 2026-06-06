@@ -1,13 +1,13 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
 import { useAuth } from '../context/AuthContext'
 import client from '../api/client'
 
 export default function Login() {
   const [form, setForm] = useState({ username: '', password: '' })
   const [showPwd, setShowPwd] = useState(false)
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { login } = useAuth()
   const navigate = useNavigate()
@@ -17,30 +17,49 @@ export default function Login() {
     if (error) setError('')
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const loginMutation = useMutation({
+    mutationFn: async (credentials: typeof form) => {
+      const res = await client.post('/auth/login/', credentials)
+      return res.data.data
+    },
+    onSuccess: async (data) => {
+      const token = data.token
+      // Temporarily store the token so the request interceptor attaches it
+      localStorage.setItem('token', token)
+
+      try {
+        // Fetch complete user profile details (e.g. company_id, company_name)
+        const meRes = await client.get('/auth/me/')
+        if (meRes.data.success) {
+          login(token, meRes.data.data)
+          navigate('/', { replace: true })
+        } else {
+          localStorage.removeItem('token')
+          setError(meRes.data.message || 'Failed to fetch user profile.')
+        }
+      } catch (meErr: any) {
+        localStorage.removeItem('token')
+        setError(meErr.response?.data?.message || 'Failed to retrieve profile details.')
+      }
+    },
+    onError: (err: any) => {
+      setError(
+        err.response?.data?.message ||
+          'Unable to connect to server. Make sure the backend is running.'
+      )
+    }
+  })
+
+  const loading = loginMutation.isPending
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.username.trim() || !form.password) {
       setError('Username and password are required.')
       return
     }
-    setLoading(true)
     setError('')
-    try {
-      const res = await client.post('/auth/login/', form)
-      if (res.data.success) {
-        login(res.data.data.token, res.data.data.user)
-        navigate('/', { replace: true })
-      } else {
-        setError(res.data.message || 'Login failed. Please try again.')
-      }
-    } catch (err: any) {
-      setError(
-        err.response?.data?.message ||
-          'Unable to connect to server. Make sure the backend is running.'
-      )
-    } finally {
-      setLoading(false)
-    }
+    loginMutation.mutate(form)
   }
 
   return (

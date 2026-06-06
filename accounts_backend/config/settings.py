@@ -37,7 +37,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = 'accounts_backend.urls'
+ROOT_URLCONF = 'config.urls'
 
 JWT_SECRET       = os.environ.get('JWT_SECRET', 'django-insecure-gcefzcoxjldym==7x!s1j0$bk#bf3*jxdc1f(r^53bs6gjbfo1')
 JWT_EXPIRY_HOURS = 168
@@ -57,7 +57,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'accounts_backend.wsgi.application'
+WSGI_APPLICATION = 'config.wsgi.application'
 
 
 DATABASES = {

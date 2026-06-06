@@ -1,8 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
-// Custom APIs for renderer
-const api = {}
+// Expose a typed ipcRenderer to the renderer process
+const api = {
+  ipcRenderer: {
+    invoke: (channel: string, ...args: unknown[]) =>
+      ipcRenderer.invoke(channel, ...args),
+    send: (channel: string, ...args: unknown[]) =>
+      ipcRenderer.send(channel, ...args),
+    on: (channel: string, callback: (...args: unknown[]) => void) =>
+      ipcRenderer.on(channel, (_event, ...args) => callback(...args)),
+    removeAllListeners: (channel: string) =>
+      ipcRenderer.removeAllListeners(channel),
+  },
+}
 
 const customElectronAPI = {
   minimize: () => ipcRenderer.send('window-minimize'),
@@ -12,9 +23,6 @@ const customElectronAPI = {
     ipcRenderer.invoke('save-invoice-pdf', { htmlContent, filename })
 }
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
@@ -24,10 +32,10 @@ if (process.contextIsolated) {
     console.error(error)
   }
 } else {
-  // @ts-ignore (define in dts)
+  // @ts-ignore
   window.electron = electronAPI
-  // @ts-ignore (define in dts)
+  // @ts-ignore
   window.api = api
-  // @ts-ignore (define in dts)
+  // @ts-ignore
   window.electronAPI = customElectronAPI
 }

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import React, { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Building,
   User,
@@ -35,8 +36,9 @@ export default function Settings() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<'company' | 'user' | 'password'>('company')
 
+  const queryClient = useQueryClient()
+
   // Company Profile states
-  const [company, setCompany] = useState<CompanyData | null>(null)
   const [isEditingCompany, setIsEditingCompany] = useState(false)
   const [companyForm, setCompanyForm] = useState<CompanyData>({
     company_name: '',
@@ -67,29 +69,18 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState('')
 
   // UI state
-  const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  useEffect(() => {
-    fetchCompanyData()
-  }, [])
+  // Queries
+  const { data: companyProfileData, isLoading: loadingCompany } = useQuery({
+    queryKey: ['companyProfile'],
+    queryFn: async () => {
+      const res = await client.get('/company/profile/')
+      return res.data.data as CompanyData
+    }
+  })
 
-  const fetchCompanyData = () => {
-    setLoading(true)
-    client
-      .get('/company/profile/')
-      .then((res) => {
-        if (res.data.success) {
-          setCompany(res.data.data)
-          setCompanyForm(res.data.data)
-        }
-      })
-      .catch((err) => {
-        console.error(err)
-        showNotification('error', 'Failed to load company profile')
-      })
-      .finally(() => setLoading(false))
-  }
+  const company = companyProfileData || null
 
   const showNotification = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text })
@@ -98,38 +89,59 @@ export default function Settings() {
     }, 4000)
   }
 
+  // Mutations
+  const updateCompanyMutation = useMutation({
+    mutationFn: async (updatedData: CompanyData) => {
+      const res = await client.put('/company/profile/update/', updatedData)
+      return res.data
+    },
+    onSuccess: () => {
+      setIsEditingCompany(false)
+      queryClient.invalidateQueries({ queryKey: ['companyProfile'] })
+      showNotification('success', 'Company profile updated successfully')
+    },
+    onError: (err: any) => {
+      showNotification('error', err.response?.data?.message || 'Failed to update company profile')
+    }
+  })
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await client.post('/auth/change-password/', payload)
+      return res.data
+    },
+    onSuccess: () => {
+      showNotification('success', 'Password changed successfully')
+      setOldPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    },
+    onError: (err: any) => {
+      showNotification('error', err.response?.data?.message || 'Old password incorrect')
+    }
+  })
+
+  const loading = loadingCompany || updateCompanyMutation.isPending || changePasswordMutation.isPending
+
+  const startEditingCompany = () => {
+    if (company) {
+      setCompanyForm(company)
+    }
+    setIsEditingCompany(true)
+  }
+
   // Handle Company Save
   const handleCompanySave = (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    client
-      .put('/company/profile/update/', companyForm)
-      .then((res) => {
-        if (res.data.success) {
-          setCompany(companyForm)
-          setIsEditingCompany(false)
-          showNotification('success', 'Company profile updated successfully')
-        } else {
-          showNotification('error', res.data.message || 'Failed to update company profile')
-        }
-      })
-      .catch((err) => {
-        console.error(err)
-        showNotification('error', 'Server error updating company profile')
-      })
-      .finally(() => setLoading(false))
+    updateCompanyMutation.mutate(companyForm)
   }
 
   // Handle User Save
   const handleUserSave = (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     // Simulate updating user profile (since there is no direct endpoint in views yet)
-    setTimeout(() => {
-      setIsEditingUser(false)
-      showNotification('success', 'User profile details mock-saved successfully')
-      setLoading(false)
-    }, 800)
+    setIsEditingUser(false)
+    showNotification('success', 'User profile details mock-saved successfully')
   }
 
   // Handle Password Save
@@ -143,29 +155,10 @@ export default function Settings() {
       showNotification('error', 'New passwords do not match')
       return
     }
-
-    setLoading(true)
-    client
-      .post('/auth/change-password/', {
-        old_password: oldPassword,
-        new_password: newPassword
-      })
-      .then((res) => {
-        if (res.data.success) {
-          showNotification('success', 'Password changed successfully')
-          setOldPassword('')
-          setNewPassword('')
-          setConfirmPassword('')
-        } else {
-          showNotification('error', res.data.message || 'Failed to change password')
-        }
-      })
-      .catch((err) => {
-        console.error(err)
-        const errMsg = err.response?.data?.message || 'Old password incorrect'
-        showNotification('error', errMsg)
-      })
-      .finally(() => setLoading(false))
+    changePasswordMutation.mutate({
+      old_password: oldPassword,
+      new_password: newPassword
+    })
   }
 
   return (
@@ -302,7 +295,7 @@ export default function Settings() {
                 {!isEditingCompany && (
                   <button
                     className="btn btn-outline btn-sm"
-                    onClick={() => setIsEditingCompany(true)}
+                    onClick={startEditingCompany}
                   >
                     <Edit2 size={13} /> Edit Profile
                   </button>
@@ -503,7 +496,6 @@ export default function Settings() {
                         className="btn btn-outline"
                         onClick={() => {
                           setIsEditingCompany(false)
-                          if (company) setCompanyForm(company)
                         }}
                       >
                         <X size={15} /> Cancel

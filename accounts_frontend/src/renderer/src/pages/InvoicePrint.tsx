@@ -1,913 +1,720 @@
 // src/renderer/src/pages/InvoicePrint.tsx
-// Renders a print-ready invoice that matches the OM Circuit System bill layout.
-// Supports View (modal), Print (window.print), and Download PDF (Electron print-to-PDF).
+//
+// Renders the invoice exactly like invoice_pdf.html (monochrome, A4 layout)
+// and generates a PDF by printing the hidden #invoice-print-area div via
+// Electron's webContents.printToPDF IPC call — zero external dependencies.
 
-import { useEffect, useRef, useState, useCallback } from 'react'
-import { X, Printer, Download, Loader, Eye } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, Download, Printer } from 'lucide-react'
 import client from '../api/client'
+import qrCodeUrl from '../assets/qr_code.jpeg'
+import signatureUrl from '../assets/signature.jpg'
 
-/* ── Types ─────────────────────────────────────────────────── */
-interface CompanyProfile {
-  company_name: string
-  gstin?: string
-  address?: string
-  city?: string
-  state?: string
-  pincode?: string
-  phone?: string
-  email?: string
-  bank_name?: string
-  account_number?: string
-  ifsc_code?: string
-  invoice_prefix?: string
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Types  (aligned with InvoiceSerializer + InvoiceItemSerializer)
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface InvoiceItem {
-  item_id?: number
-  product_name?: string
-  hsn_code?: string
-  quantity: number | string
-  unit_price: number | string
-  gst_percentage: number | string
-  taxable_amount?: number | string
-  cgst_amount?: number | string
-  sgst_amount?: number | string
-  igst_amount?: number | string
-  total_amount?: number | string
+  item_id: number
+  product_name: string
+  hsn_code: string | null
+  quantity: string
+  unit_price: string
+  gst_percentage: string
+  taxable_amount: string
+  cgst_amount: string
+  sgst_amount: string
+  igst_amount: string
+  total_amount: string
 }
 
-interface InvoiceData {
+interface Invoice {
   invoice_id: number
   invoice_number: string
-  invoice_type: string
+  invoice_type: 'TAX' | 'RETAIL'
   invoice_date: string
+  due_date: string | null
+  financial_year: string
   customer_id: number
   customer_name: string
-  customer_mobile?: string
-  contact_person?: string
-  customer_address?: string
-  customer_city?: string
-  customer_state?: string
-  customer_gstin?: string
-  customer_email?: string
-  subtotal: number | string
-  cgst_amount: number | string
-  sgst_amount: number | string
-  igst_amount: number | string
-  discount_amount: number | string
-  round_off?: number | string
-  grand_total: number | string
-  due_amount: number | string
+  customer_mobile: string | null
+  customer_address: string | null
+  customer_city: string | null
+  customer_state: string | null
+  customer_gstin: string | null
+  customer_email: string | null
+  contact_person: string | null
+  subtotal: string
+  cgst_amount: string
+  sgst_amount: string
+  igst_amount: string
+  discount_amount: string
+  round_off: string
+  grand_total: string
+  due_amount: string
   payment_status: string
-  notes?: string
-  items?: InvoiceItem[]
+  notes: string | null
+  items: InvoiceItem[]
 }
 
-interface Props {
-  invoiceId: number
-  onClose: () => void
-  autoDownload?: boolean
+interface Company {
+  company_id: number
+  company_name: string
+  gstin: string | null
+  address: string | null
+  city: string | null
+  state: string | null
+  pincode: string | null
+  phone: string | null
+  email: string | null
+  bank_name: string | null
+  account_number: string | null
+  ifsc_code: string | null
 }
 
-/* ── Number helpers ─────────────────────────────────────────── */
-const n = (v: number | string | null | undefined) => Number(v ?? 0)
-const fixed2 = (v: number | string | null | undefined) => n(v).toFixed(2)
-const comma = (v: number | string | null | undefined) =>
-  n(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-const fmtDate = (d: string) => {
-  if (!d) return ''
-  const dt = new Date(d)
-  return `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`
+const fmt = (v: string | number | null | undefined, dp = 2) => {
+  const n = parseFloat(String(v ?? 0))
+  return isNaN(n) ? '0.00' : n.toFixed(dp)
 }
 
-/* ── Amount in words ─────────────────────────────────────────── */
-const ones = [
-  '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
-  'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
-  'Seventeen', 'Eighteen', 'Nineteen'
-]
-const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
+const fmtDate = (d: string | null | undefined) => {
+  if (!d) return '—'
+  const parts = d.split('-')
+  if (parts.length !== 3) return d
+  return `${parts[2]}/${parts[1]}/${parts[0]}`
+}
 
-function toWords(num: number): string {
-  if (num === 0) return 'Zero'
-  if (num < 20) return ones[num]
-  if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? ' ' + ones[num % 10] : '')
-  if (num < 1000)
-    return ones[Math.floor(num / 100)] + ' Hundred' + (num % 100 ? ' ' + toWords(num % 100) : '')
-  if (num < 100000)
-    return toWords(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + toWords(num % 1000) : '')
-  if (num < 10000000)
-    return toWords(Math.floor(num / 100000)) + ' Lakh' + (num % 100000 ? ' ' + toWords(num % 100000) : '')
-  return toWords(Math.floor(num / 10000000)) + ' Crore' + (num % 10000000 ? ' ' + toWords(num % 10000000) : '')
+// Indian number-to-words
+const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven',
+  'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen',
+  'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
+const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty',
+  'Sixty', 'Seventy', 'Eighty', 'Ninety']
+
+function toWords(n: number): string {
+  if (n === 0) return 'Zero'
+  if (n < 20) return ones[n]
+  if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '')
+  if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + toWords(n % 100) : '')
+  if (n < 100000) return toWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + toWords(n % 1000) : '')
+  if (n < 10000000) return toWords(Math.floor(n / 100000)) + ' Lakh' + (n % 100000 ? ' ' + toWords(n % 100000) : '')
+  return toWords(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 ? ' ' + toWords(n % 10000000) : '')
 }
 
 function amountInWords(amount: number): string {
   const rupees = Math.floor(amount)
   const paise = Math.round((amount - rupees) * 100)
   let result = 'Rs. ' + toWords(rupees)
-  if (paise > 0) result += ' And ' + toWords(paise) + ' Paise'
+  if (paise) result += ' And ' + toWords(paise) + ' Paise'
   return result + ' Only'
 }
 
-/* ── GST note line ───────────────────────────────────────────── */
-function buildGstNote(inv: InvoiceData): string {
-  const taxable = n(inv.subtotal)
-  const cgst = n(inv.cgst_amount)
-  const sgst = n(inv.sgst_amount)
-  const igst = n(inv.igst_amount)
-  const pct = n(inv.items?.[0]?.gst_percentage ?? 0)
-  if (igst > 0) {
-    return `IGST ${fixed2(igst)} @ ${pct}%  |  THANKS CUSTOMER`
-  }
-  if (cgst > 0 || sgst > 0) {
-    const halfPct = pct / 2
-    return `GST ${fixed2(taxable)}*${halfPct}+${halfPct}%=${fixed2(cgst)}SGST+${fixed2(sgst)}CGST,  THANKS CUSTOMER`
-  }
-  return 'NON-GST INVOICE  |  THANKS CUSTOMER'
+// ─────────────────────────────────────────────────────────────────────────────
+// CSS injected into the print window — mirrors invoice_pdf.html exactly
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PRINT_CSS = `
+@page { size: A4 portrait; margin: 8mm; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; background: #fff; }
+body {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 8.5pt;
+  color: #000;
+  line-height: 1.35;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.invoice-wrap {
+  width: 100%;
+  border: 1.5px solid #000;
+  min-height: 270mm;
+  display: flex;
+  flex-direction: column;
+}
+.title-bar {
+  text-align: center;
+  padding: 5px 6px 3px;
+  border-bottom: 1.5px solid #000;
+}
+.bill-type { font-size: 8pt; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; }
+.company-name { font-size: 17pt; font-weight: bold; letter-spacing: 1px; line-height: 1.15; margin: 1px 0; }
+.company-addr { font-size: 7.5pt; line-height: 1.4; }
+.gstin-strip {
+  text-align: center; font-size: 8pt; font-weight: bold;
+  padding: 3px 6px; background: #e8e8e8;
+  border-bottom: 1px solid #000; letter-spacing: 1px;
+}
+.info-row { display: flex; border-bottom: 1px solid #000; }
+.info-col { flex: 1; padding: 4px 7px; font-size: 8pt; line-height: 1.5; }
+.info-col + .info-col { border-left: 1px solid #000; }
+.block-title { font-weight: bold; font-size: 8.5pt; text-decoration: underline; margin-bottom: 2px; display: block; }
+.meta-table { width: 100%; border-collapse: collapse; }
+.meta-table td { padding: 0 2px; font-size: 8pt; vertical-align: top; }
+.meta-table td:first-child { font-weight: bold; white-space: nowrap; padding-right: 4px; min-width: 90px; }
+.items-table { width: 100%; border-collapse: collapse; flex: 1; }
+.items-table th, .items-table td { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; }
+.items-table th:first-child, .items-table td:first-child { border-left: none; }
+.items-table th:last-child, .items-table td:last-child { border-right: none; }
+.items-table thead tr:first-child th { border-top: none; }
+.items-table thead th { background: #d0d0d0; font-weight: bold; text-align: center; font-size: 8pt; }
+.items-table tbody td { font-size: 8pt; height: 28px; }
+.items-table tbody tr.empty-row td { height: 28px; }
+.items-table tbody tr.filler-row td { height: auto; }
+.num { text-align: right; }
+.cen { text-align: center; }
+.totals-row { display: flex; border-top: 1.5px solid #000; border-bottom: 1px solid #000; min-height: 62px; }
+.gst-note-col { flex: 1; padding: 5px 7px; font-size: 7.5pt; border-right: 1px solid #000; display: flex; align-items: flex-end; }
+.totals-col { width: 200px; }
+.totals-col table { width: 100%; border-collapse: collapse; }
+.totals-col table td { padding: 2px 6px; font-size: 8pt; border-bottom: 1px solid #d0d0d0; }
+.totals-col table tr:last-child td { border-bottom: none; }
+.t-label { font-weight: bold; }
+.t-value { text-align: right; font-family: 'Courier New', monospace; }
+.grand-row td { background: #d0d0d0; font-weight: bold; font-size: 9pt; border-top: 1.5px solid #000; border-bottom: none; }
+.amount-words { padding: 4px 7px; font-size: 7.5pt; font-weight: bold; border-bottom: 1px solid #000; }
+.bottom-strip { display: flex; flex: 1; min-height: 80px; }
+.bottom-col { padding: 5px 7px; font-size: 7.5pt; line-height: 1.6; flex: 1; }
+.bottom-col + .bottom-col { border-left: 1px solid #000; }
+.col-title { font-weight: bold; font-size: 8pt; text-decoration: underline; margin-bottom: 3px; display: block; }
+.b-label { font-weight: bold; display: inline-block; min-width: 82px; }
+.sig-col {
+  display: flex; flex-direction: column; justify-content: space-between;
+  align-items: flex-end; text-align: center;
+  padding: 5px 10px; min-width: 160px; flex-shrink: 0;
+}
+.for-label { font-size: 7.5pt; font-weight: bold; align-self: flex-end; }
+.sig-space { width: 120px; height: 40px; border-bottom: 1px solid #000; margin: 6px auto 4px; }
+.auth-label { font-size: 7.5pt; font-weight: bold; text-align: center; width: 100%; }
+`
+
+const toBase64 = (url: string): Promise<string> => {
+  return fetch(url)
+    .then((response) => response.blob())
+    .then((blob) => new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    }))
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   InvoicePrint Component
-═══════════════════════════════════════════════════════════════ */
-export default function InvoicePrint({ invoiceId, onClose, autoDownload }: Props) {
-  const [inv, setInv] = useState<InvoiceData | null>(null)
-  const [company, setCompany] = useState<CompanyProfile | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const printRef = useRef<HTMLDivElement>(null)
+// ─────────────────────────────────────────────────────────────────────────────
+// InvoiceDocument — mirrors invoice_pdf.html structure with CSS classes
+// ─────────────────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [invRes, coRes] = await Promise.all([
-          client.get(`/invoices/${invoiceId}/`),
-          client.get('/company/profile/')
-        ])
-        if (invRes.data.success) setInv(invRes.data.data)
-        else setError('Failed to load invoice.')
-        if (coRes.data.success) setCompany(coRes.data.data)
-      } catch {
-        setError('Network error loading invoice.')
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-  }, [invoiceId])
-
-  /* ── Print handler ───────────────────────────────────────── */
-  const handlePrint = () => {
-    const content = printRef.current
-    if (!content) return
-
-    const printWindow = window.open('', '_blank', 'width=900,height=700')
-    if (!printWindow) return
-
-    const styleEl = document.createElement('style')
-    styleEl.textContent = getPrintCSS()
-
-    if (printWindow.document.head) {
-      printWindow.document.head.appendChild(styleEl)
-    } else {
-      printWindow.document.appendChild(styleEl)
-    }
-    printWindow.document.body.innerHTML = content.outerHTML
-    printWindow.document.title = `Invoice-${inv?.invoice_number || invoiceId}`
-
-    setTimeout(() => {
-      printWindow.focus()
-      printWindow.print()
-      printWindow.close()
-    }, 400)
-  }
-
-  /* ── View in new window handler ───────────────────────────── */
-  const handleView = () => {
-    const content = printRef.current
-    if (!content) return
-
-    const viewWindow = window.open('', '_blank', 'width=900,height=700')
-    if (!viewWindow) return
-
-    viewWindow.document.write(`<!DOCTYPE html><html lang="en"><head>
-      <meta charset="UTF-8"/>
-      <title>Invoice ${inv?.invoice_number || invoiceId}</title>
-      <style>${getPrintCSS()}</style>
-    </head><body style="background:#f0f0f0;margin:0;padding:30px;display:flex;justify-content:center;">
-      ${content.outerHTML}
-    </body></html>`)
-    viewWindow.document.close()
-    viewWindow.focus()
-  }
-
-  /* ── Download PDF via Electron printToPDF IPC ── */
-  const [downloading, setDownloading] = useState(false)
-
-
-  const handleDownload = useCallback(async () => {
-    if (!inv || !printRef.current) return
-    setDownloading(true)
-
-    try {
-      // Build a full self-contained HTML document from the live invoice DOM
-      const invoiceHTML = printRef.current.outerHTML
-      const htmlDoc = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <title>${inv.invoice_number}</title>
-  <style>${getPrintCSS()}</style>
-</head>
-<body style="background:#fff;margin:0;padding:20px;">
-  ${invoiceHTML}
-</body>
-</html>`
-
-      const filename = `${inv.invoice_number}.pdf`
-
-      // Use Electron IPC to have the main process run printToPDF + save dialog
-      if (window.electronAPI?.saveInvoicePDF) {
-        const result = await window.electronAPI.saveInvoicePDF(htmlDoc, filename)
-        if (result.success) {
-          // Optionally show a brief success toast (simple alert for now)
-          console.log('PDF saved to:', result.filePath)
-        } else if (result.reason !== 'cancelled') {
-          alert(`PDF download failed: ${result.reason}`)
-        }
-      } else {
-        // Fallback for non-Electron / browser dev environment
-        const printWindow = window.open('', '_blank', 'width=900,height=1200')
-        if (!printWindow) return
-        printWindow.document.write(`<!DOCTYPE html><html><head>
-          <meta charset="UTF-8"/>
-          <title>${inv.invoice_number}</title>
-          <style>${getPrintCSS()}</style>
-        </head><body style="margin:0;padding:20px">${invoiceHTML}</body></html>`)
-        printWindow.document.close()
-        setTimeout(() => { printWindow.print(); printWindow.close() }, 600)
-      }
-    } catch (err) {
-      console.error('PDF download error:', err)
-      alert('Failed to generate PDF. Please try again.')
-    } finally {
-      setDownloading(false)
-    }
-  }, [inv, onClose])
-
-  /* ── Auto-download: trigger ONCE when data is ready ───── */
-  const downloadTriggered = useRef(false)
-  useEffect(() => {
-    if (autoDownload && inv && !loading && !downloadTriggered.current) {
-      downloadTriggered.current = true
-      handleDownload().then(() => onClose())
-    }
-  }, [autoDownload, inv, loading, handleDownload, onClose])
-
-  if (loading) {
-    return (
-      <div className="overlay" onClick={onClose}>
-        <div
-          className="modal"
-          style={{
-            width: 500,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 60,
-            gap: 12
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Loader size={22} style={{ animation: 'spin 1s linear infinite' }} />
-          <span className="t2">Loading invoice…</span>
-        </div>
-      </div>
-    )
-  }
-
-  if (error || !inv) {
-    return (
-      <div className="overlay" onClick={onClose}>
-        <div
-          className="modal"
-          style={{ width: 400, padding: 32, textAlign: 'center' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ color: 'var(--danger)', marginBottom: 12 }}>{error || 'Invoice not found.'}</div>
-          <button className="btn btn-outline" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  const isGST = inv.invoice_type === 'GST'
-  const items = inv.items || []
-  const grandTotal = n(inv.grand_total)
-  const roundOff = n(inv.round_off ?? 0)
-  const subtotal = n(inv.subtotal)
-  const cgst = n(inv.cgst_amount)
-  const sgst = n(inv.sgst_amount)
-  const igst = n(inv.igst_amount)
-
-  // Determine GST percentage for the summary line
-  const gstPct = n(items[0]?.gst_percentage ?? 0)
+function InvoiceDocument({
+  invoice,
+  company,
+  qrCodeBase64,
+  sigBase64
+}: {
+  invoice: Invoice
+  company: Company
+  qrCodeBase64: string
+  sigBase64: string
+}) {
+  const isTax = invoice.invoice_type === 'TAX'
+  const igstTotal = parseFloat(invoice.igst_amount ?? '0')
+  const isInterstate = isTax && igstTotal > 0
+  const gstPct = invoice.items?.[0] ? parseFloat(invoice.items[0].gst_percentage) : 0
   const halfPct = gstPct / 2
-  const isInterstate = isGST && igst > 0
+
+  const subtotal = parseFloat(invoice.subtotal ?? '0')
+  const cgst = parseFloat(invoice.cgst_amount ?? '0')
+  const sgst = parseFloat(invoice.sgst_amount ?? '0')
+  const igst = parseFloat(invoice.igst_amount ?? '0')
+  const discount = parseFloat(invoice.discount_amount ?? '0')
+  const roundOff = parseFloat(invoice.round_off ?? '0')
+  const grandTotal = parseFloat(invoice.grand_total ?? '0')
+
+  const emptyRows = Math.max(0, 12 - (invoice.items?.length ?? 0))
+  const invoiceTypeLabel = isTax ? 'TAX INVOICE' : 'RETAIL INVOICE'
+
+  let gstNote = ''
+  if (isTax && isInterstate) {
+    gstNote = `GST ${subtotal.toFixed(2)} × ${gstPct}% = ${igst.toFixed(2)} IGST  |  THANKS CUSTOMER`
+  } else if (isTax) {
+    gstNote = `GST ${subtotal.toFixed(2)} × ${halfPct}+${halfPct}% = ${cgst.toFixed(2)} CGST + ${sgst.toFixed(2)} SGST  |  THANKS CUSTOMER`
+  } else {
+    gstNote = 'NON-GST INVOICE  |  THANKS CUSTOMER'
+  }
 
   return (
-    <div
-      className="overlay"
-      style={{
-        zIndex: 9999,
-        ...(autoDownload ? { visibility: 'hidden', pointerEvents: 'none' } : {})
-      }}
-      onClick={autoDownload ? undefined : onClose}
-    >
-      <style dangerouslySetInnerHTML={{ __html: getPrintCSS() }} />
-      {/* ── Action toolbar (outside print area) ── */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 16,
-          right: 16,
-          display: 'flex',
-          gap: 10,
-          zIndex: 10000
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 1️⃣ View */}
-        <button
-          onClick={handleView}
-          className="btn btn-outline row gap-2"
-          style={{
-            background: 'rgba(255,255,255,0.15)',
-            backdropFilter: 'blur(6px)',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-            color: '#fff',
-            border: '1.5px solid rgba(255,255,255,0.4)'
-          }}
-        >
-          <Eye size={15} /> View
-        </button>
+    <div className="invoice-wrap">
 
-        {/* 2️⃣ Print */}
-        <button
-          onClick={handlePrint}
-          className="btn btn-primary row gap-2"
-          style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}
-        >
-          <Printer size={15} /> Print
-        </button>
-
-        {/* 3️⃣ Download PDF */}
-        <button
-          onClick={handleDownload}
-          disabled={downloading}
-          className="btn btn-outline row gap-2"
-          style={{
-            background: '#fff',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-            color: 'var(--t1)',
-            opacity: downloading ? 0.7 : 1,
-            cursor: downloading ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {downloading ? <Loader size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={15} />}
-          {downloading ? 'Generating…' : 'Download PDF'}
-        </button>
-
-        {/* ✖ Close */}
-        <button
-          onClick={onClose}
-          style={{
-            background: 'rgba(0,0,0,0.6)',
-            border: 'none',
-            borderRadius: 8,
-            padding: '8px 14px',
-            cursor: 'pointer',
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 13,
-            fontWeight: 600
-          }}
-        >
-          <X size={15} /> Close
-        </button>
+      {/* 1. TITLE BAR */}
+      <div className="title-bar">
+        <div className="bill-type">{invoiceTypeLabel}</div>
+        <div className="company-name">{(company.company_name ?? '').toUpperCase()}</div>
+        <div className="company-addr">
+          {[company.address, company.city].filter(Boolean).join(', ')}
+          {company.pincode ? ` – ${company.pincode}` : ''}
+          <br />
+          Phone&nbsp;:&nbsp;{company.phone || '—'}
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          E-Mail&nbsp;:&nbsp;{company.email || '—'}
+        </div>
       </div>
 
-      {/* ── Invoice paper wrapper ── */}
-      <div
-        style={{
-          overflowY: 'auto',
-          maxHeight: '100vh',
-          padding: '60px 20px 40px',
-          display: 'flex',
-          justifyContent: 'center'
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          ref={printRef}
-          id="invoice-print-area"
-          className="invoice-sheet"
-        >
-          {/* ① HEADER */}
-          <div className="header">
-            <div className="invoice-type">{isGST ? 'GST Invoice' : 'Non-GST Invoice'}</div>
-            <div className="company-name">{company?.company_name || 'Your Company'}</div>
-            <div className="company-address">
-              {company?.address && <>{company.address},<br /></>}
-              {company?.city && <>{company.city}</>}{company?.state && <>, {company.state}</>}{company?.pincode && <> - {company.pincode}</>}<br />
-              {company?.phone && <>Phone : {company.phone}&nbsp;&nbsp;&nbsp;</>}
-              {company?.email && <>E-Mail : {company.email}</>}
-            </div>
-          </div>
+      {/* 2. GSTIN STRIP */}
+      <div className="gstin-strip">
+        GSTIN&nbsp;:&nbsp;{company.gstin || 'N/A'}
+      </div>
 
-          {/* ② GSTIN BAND */}
-          {isGST && company?.gstin && (
-            <div className="gstin-band">GSTIN : {company.gstin}</div>
-          )}
+      {/* 3. CUSTOMER ↔ INVOICE META */}
+      <div className="info-row">
+        <div className="info-col">
+          <span className="block-title">M/s {(invoice.customer_name ?? '').toUpperCase()}</span>
+          {invoice.customer_address}
+          {invoice.customer_city ? `, ${invoice.customer_city}` : ''}
+          {invoice.customer_state ? `\u00a0\u00a0State\u00a0:\u00a0${invoice.customer_state}` : ''}
+          <br />
+          PH.NO.&nbsp;:&nbsp;{invoice.customer_mobile || '—'}
+          <br />
+          {invoice.customer_gstin && <>GSTIN&nbsp;:&nbsp;{invoice.customer_gstin}</>}
+        </div>
 
-          {/* ③ BUYER DETAILS + ④ INVOICE META */}
-          <div className="billing-row">
-            {/* Buyer block */}
-            <div className="buyer-block">
-              <div className="buyer-name">M/s {inv.customer_name}</div>
-              {inv.customer_address && <div>{inv.customer_address}</div>}
-              <div>
-                {inv.customer_city && <>{inv.customer_city}&nbsp;&nbsp;</>}
-                {inv.customer_state && <>State : {inv.customer_state}</>}
-              </div>
-              {inv.customer_mobile && <div style={{ marginTop: 4 }}>PH.NO.: {inv.customer_mobile}</div>}
-              {inv.contact_person && <div>DL.No. : {inv.contact_person}</div>}
-              {isGST && inv.customer_gstin && (
-                <div className="buyer-gstin">GSTIN : {inv.customer_gstin}</div>
-              )}
-            </div>
-
-            {/* Invoice meta block */}
-            <div className="meta-block">
-              <table className="meta-table">
-                <tbody>
-                  <tr>
-                    <td className="label">Invoice No.</td>
-                    <td className="colon">:</td>
-                    <td className="value" style={{ fontWeight: 700 }} colSpan={4}>{inv.invoice_number}</td>
-                  </tr>
-                  <tr>
-                    <td className="label">Date</td>
-                    <td className="colon">:</td>
-                    <td className="value" style={{ fontWeight: 700 }} colSpan={4}>{fmtDate(inv.invoice_date)}</td>
-                  </tr>
-                  <tr>
-                    <td className="label">Order No.</td>
-                    <td className="colon">:</td>
-                    <td colSpan={4}></td>
-                  </tr>
-                  <tr>
-                    <td className="label">L.R. No.</td>
-                    <td className="colon">:</td>
-                    <td colSpan={4}></td>
-                  </tr>
-                  <tr>
-                    <td className="label">Cases</td>
-                    <td className="colon">:</td>
-                    <td className="value" colSpan={4}>0</td>
-                  </tr>
-                  <tr>
-                    <td className="label">Transport</td>
-                    <td className="colon">:</td>
-                    <td colSpan={4}></td>
-                  </tr>
-                  <tr className="due-row">
-                    <td className="label">Due Date</td>
-                    <td className="colon">:</td>
-                    <td className="value" colSpan={4}>{fmtDate(inv.invoice_date)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* ⑤ ITEM TABLE */}
-          <table className="items-table">
-            <thead>
-              <tr>
-                <th style={{ width: 28 }}>SN.</th>
-                <th className="left">PRODUCT NAME</th>
-                <th style={{ width: 72 }}>HSN<br />CODE</th>
-                <th style={{ width: 42 }}>QTY</th>
-                <th className="right" style={{ width: 72 }}>RATE</th>
-                {isGST && !isInterstate && (
-                  <>
-                    <th style={{ width: 44 }}>SGST<br />%</th>
-                    <th style={{ width: 44 }}>CGST<br />%</th>
-                  </>
-                )}
-                {isGST && isInterstate && (
-                  <th style={{ width: 44 }}>IGST<br />%</th>
-                )}
-                <th className="right" style={{ width: 84 }}>AMOUNT</th>
-              </tr>
-            </thead>
+        <div className="info-col">
+          <table className="meta-table">
             <tbody>
-              {items.map((item, idx) => {
-                const taxable = n(item.taxable_amount ?? n(item.quantity) * n(item.unit_price))
-                const gstPctItem = n(item.gst_percentage)
-                const halfPctItem = gstPctItem / 2
-                const amount = taxable
-                return (
-                  <tr key={idx}>
-                    <td className="sn">{idx + 1}.</td>
-                    <td className="product">
-                      {item.product_name}
-                      {inv.notes && idx === items.length - 1 && (
-                        <div className="item-remark">REMARK : {inv.notes}</div>
-                      )}
-                    </td>
-                    <td className="hsn">{item.hsn_code || ''}</td>
-                    <td className="qty">{fixed2(item.quantity)}</td>
-                    <td className="rate">{fixed2(item.unit_price)}</td>
-                    {isGST && !isInterstate && (
-                      <>
-                        <td className="gst-pct">{halfPctItem.toFixed(2)}</td>
-                        <td className="gst-pct">{halfPctItem.toFixed(2)}</td>
-                      </>
-                    )}
-                    {isGST && isInterstate && (
-                      <td className="gst-pct">{gstPctItem.toFixed(2)}</td>
-                    )}
-                    <td className="amount">{comma(amount)}</td>
-                  </tr>
-                )
-              })}
-
-              {/* Empty filler rows to fill invoice space */}
-              {Array.from({ length: Math.max(0, 12 - items.length) }).map((_, i) => (
-                <tr key={`empty-${i}`} className="empty-row">
-                  <td className="sn"></td>
-                  <td></td>
-                  <td className="hsn"></td>
-                  <td className="qty"></td>
-                  <td className="rate"></td>
-                  {isGST && !isInterstate && (
-                    <>
-                      <td className="gst-pct"></td>
-                      <td className="gst-pct"></td>
-                    </>
-                  )}
-                  {isGST && isInterstate && (
-                    <td className="gst-pct"></td>
-                  )}
-                  <td className="amount"></td>
+              {([
+                ['Invoice No.', <strong key="no">{invoice.invoice_number}</strong>],
+                ['Date', fmtDate(invoice.invoice_date)],
+                ['Order No.', ''],
+                ['L.R. No.', ''],
+                ['Cases', '0'],
+                ['Transport', ''],
+                ['Due Date', fmtDate(invoice.due_date)],
+              ] as [string, React.ReactNode][]).map(([label, val]) => (
+                <tr key={label}>
+                  <td>{label}</td>
+                  <td>:&nbsp;{val}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
 
-          {/* ⑥⑦⑧⑨⑩ FOOTER */}
-          <div className="footer-row">
-            {/* Left: GST note, amount in words, terms, receiver sig */}
-            <div className="footer-left">
-              <div>
-                {/* ⑥ Tax note line */}
-                <div className="gst-note">
-                  {buildGstNote(inv)}
-                </div>
-                {/* ⑧ Amount in words */}
-                <div className="amount-words">
-                  {amountInWords(grandTotal)}
-                </div>
-                {/* ⑨ Terms & Conditions */}
-                <div className="terms-block">
-                  <div className="terms-title">Terms &amp; Conditions</div>
-                  <div className="terms-text">Subject to {company?.city || 'local'} jurisdiction</div>
-                </div>
+      {/* 4. LINE-ITEMS TABLE */}
+      <table className="items-table">
+        <thead>
+          <tr>
+            <th style={{ width: 28 }}>SN.</th>
+            <th>PRODUCT NAME</th>
+            <th style={{ width: 70 }}>HSN CODE</th>
+            <th style={{ width: 42 }}>QTY</th>
+            <th style={{ width: 60 }}>RATE</th>
+            {isTax && (
+              isInterstate
+                ? <th style={{ width: 48 }}>IGST&nbsp;%</th>
+                : <>
+                  <th style={{ width: 44 }}>SGST&nbsp;%</th>
+                  <th style={{ width: 44 }}>CGST&nbsp;%</th>
+                </>
+            )}
+            <th style={{ width: 70 }}>AMOUNT</th>
+          </tr>
+        </thead>
+        <tbody>
+          {invoice.items?.map((item, idx) => (
+            <tr key={item.item_id}>
+              <td className="cen">{idx + 1}</td>
+              <td>{item.product_name}</td>
+              <td className="cen">{item.hsn_code || ''}</td>
+              <td className="cen">{fmt(item.quantity, 2)}</td>
+              <td className="num">{fmt(item.unit_price)}</td>
+              {isTax && (
+                isInterstate
+                  ? <td className="cen">{fmt(item.gst_percentage, 2)}</td>
+                  : <>
+                    <td className="cen">{halfPct.toFixed(2)}</td>
+                    <td className="cen">{halfPct.toFixed(2)}</td>
+                  </>
+              )}
+              <td className="num">{fmt(item.total_amount)}</td>
+            </tr>
+          ))}
+          {Array.from({ length: emptyRows }).map((_, i) => {
+            const isLast = i === emptyRows - 1
+            return (
+              <tr className={isLast ? "empty-row filler-row" : "empty-row"} key={`e${i}`}>
+                <td /><td /><td /><td /><td />
+                {isTax && (isInterstate ? <td /> : <><td /><td /></>)}
+                <td />
+              </tr>
+            )
+          })}
+          {emptyRows === 0 && (
+            <tr className="empty-row filler-row">
+              <td /><td /><td /><td /><td />
+              {isTax && (isInterstate ? <td /> : <><td /><td /></>)}
+              <td />
+            </tr>
+          )}
+        </tbody>
+      </table>
 
-                {/* Bank details if available */}
-                {company?.bank_name && (
-                  <div style={{ marginTop: 10, fontSize: 10, color: '#333' }}>
-                    <div style={{ fontWeight: 700, marginBottom: 2 }}>Bank Details:</div>
-                    <div>{company.bank_name}</div>
-                    {company.account_number && <div>A/C: {company.account_number}</div>}
-                    {company.ifsc_code && <div>IFSC: {company.ifsc_code}</div>}
-                  </div>
-                )}
-              </div>
-              {/* ⑩ Receiver signature */}
-              <div>
-                <span className="receiver-sig">Receiver Signature</span>
-              </div>
-            </div>
-
-            {/* Right: Totals + authorised signatory */}
-            <div className="footer-right">
-              {/* ⑦ Total summary */}
-              <table className="totals-table">
-                <tbody>
-                  <tr>
-                    <td className="t-label">SUB TOTAL</td>
-                    <td className="t-value">{comma(subtotal)}</td>
+      {/* 5. GST NOTE + TOTALS */}
+      <div className="totals-row">
+        <div className="gst-note-col">{gstNote}</div>
+        <div className="totals-col">
+          <table>
+            <tbody>
+              <tr>
+                <td className="t-label">SUB TOTAL</td>
+                <td className="t-value">{subtotal.toFixed(2)}</td>
+              </tr>
+              {isTax && (
+                isInterstate
+                  ? <tr>
+                    <td className="t-label">IGST {gstPct}%</td>
+                    <td className="t-value">{igst.toFixed(2)}</td>
                   </tr>
-                  {isGST && !isInterstate && sgst > 0 && (
+                  : <>
                     <tr>
                       <td className="t-label">SGST {halfPct}%</td>
-                      <td className="t-value">{comma(sgst)}</td>
+                      <td className="t-value">{sgst.toFixed(2)}</td>
                     </tr>
-                  )}
-                  {isGST && !isInterstate && cgst > 0 && (
                     <tr>
                       <td className="t-label">CGST {halfPct}%</td>
-                      <td className="t-value">{comma(cgst)}</td>
+                      <td className="t-value">{cgst.toFixed(2)}</td>
                     </tr>
-                  )}
-                  {isGST && isInterstate && igst > 0 && (
-                    <tr>
-                      <td className="t-label">IGST {gstPct}%</td>
-                      <td className="t-value">{comma(igst)}</td>
-                    </tr>
-                  )}
-                  {n(inv.discount_amount) > 0 && (
-                    <tr className="discount">
-                      <td className="t-label">Discount</td>
-                      <td className="t-value">-{comma(inv.discount_amount)}</td>
-                    </tr>
-                  )}
-                  <tr>
-                    <td className="t-label">Roundoff</td>
-                    <td className="t-value">{fixed2(roundOff)}</td>
-                  </tr>
-                  <tr className="grand-row">
-                    <td className="t-label">GRAND TOTAL</td>
-                    <td className="t-value">{comma(grandTotal)}</td>
-                  </tr>
-                </tbody>
-              </table>
+                  </>
+              )}
+              {discount > 0 && (
+                <tr>
+                  <td className="t-label">Discount</td>
+                  <td className="t-value">- {discount.toFixed(2)}</td>
+                </tr>
+              )}
+              <tr>
+                <td className="t-label">Round Off</td>
+                <td className="t-value">{roundOff.toFixed(2)}</td>
+              </tr>
+              <tr className="grand-row">
+                <td className="t-label">GRAND TOTAL</td>
+                <td className="t-value">{grandTotal.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-              {/* ⑩ Authorised signatory */}
-              <div className="authorised-block">
-                <div className="for-co">For {company?.company_name || 'Company'}</div>
-                <div className="sig-line">Authorised signatory</div>
-              </div>
-            </div>
+      {/* 6. AMOUNT IN WORDS */}
+      <div className="amount-words">{amountInWords(grandTotal)}</div>
+
+      {/* 7. BOTTOM STRIP */}
+      <div className="bottom-strip">
+
+        <div className="bottom-col" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div>
+            <span className="col-title">Bank Details</span>
+            <span className="b-label">Bank Name</span>:&nbsp;{company.bank_name || '—'}<br />
+            <span className="b-label">A/C No.</span>:&nbsp;{company.account_number || '—'}<br />
+            <span className="b-label">IFSC Code</span>:&nbsp;{company.ifsc_code || '—'}<br />
+            <span className="b-label">Branch</span>:&nbsp;{company.city || '—'}<br />
           </div>
-
-          {/* PAID watermark */}
-          {inv.payment_status === 'PAID' && (
-            <div className="watermark">PAID</div>
+          {qrCodeBase64 && (
+            <div style={{ width: 115, height: 115, border: '1.2px solid #000', padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <img src={qrCodeBase64} style={{ width: '100%', height: '100%', objectFit: 'contain' }} alt="QR Code" />
+            </div>
           )}
         </div>
+
+        <div className="bottom-col">
+          <span className="col-title">Terms &amp; Conditions</span>
+          <ol style={{ paddingLeft: 12, margin: 0, fontSize: '7pt', lineHeight: 1.7 }}>
+            <li>Goods once sold will not be taken back or exchanged.</li>
+            <li>Interest @ 1.5% per month will be charged on overdue payments.</li>
+            <li>Subject to Ahmedabad jurisdiction only.</li>
+          </ol>
+        </div>
+
+        <div className="bottom-col sig-col">
+          <span className="for-label">For {(company.company_name ?? '').toUpperCase()}</span>
+          <div className="sig-space" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid #000' }}>
+            {sigBase64 && (
+              <img src={sigBase64} style={{ maxHeight: 38, maxWidth: 120, objectFit: 'contain' }} alt="Signature" />
+            )}
+          </div>
+          <span className="auth-label">Authorised Signatory</span>
+        </div>
+
       </div>
     </div>
   )
 }
 
-/* ── Print CSS (injected into popup window) ──────────────────── */
-function getPrintCSS(): string {
-  return `
-    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Page
+// ─────────────────────────────────────────────────────────────────────────────
 
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+interface InvoicePrintProps {
+  invoiceId?: number | string
+  onClose?: () => void
+  autoDownload?: boolean
+}
 
-    /* ── A4 sheet ── */
-    .invoice-sheet {
-      width: 210mm;
-      min-height: 297mm;
-      background: #fff;
-      margin: 0 auto;
-      border: 2px solid #000;
-      position: relative;
-      padding: 0;
-      box-shadow: 0 6px 32px rgba(0,0,0,0.35);
-      font-family: 'IBM Plex Sans', Arial, sans-serif;
-      font-size: 12px;
-      color: #000;
-    }
+export default function InvoicePrint({
+  invoiceId: propInvoiceId,
+  onClose,
+  autoDownload = false
+}: InvoicePrintProps = {}) {
+  const { invoiceId: routeInvoiceId } = useParams<{ invoiceId: string }>()
+  const navigate = useNavigate()
 
-    /* ── Header ── */
-    .header {
-      text-align: center;
-      border-bottom: 1.5px solid #000;
-      padding: 10px 16px 8px;
-      background: #c8c8c8; /* normal grey, prints well in B&W */
-    }
-    .header .invoice-type {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      margin-bottom: 3px;
-      color: #000;
-    }
-    .header .company-name {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      line-height: 1.15;
-      margin-bottom: 4px;
-      color: #000;
-    }
-    .header .company-address {
-      font-size: 11px;
-      line-height: 1.7;
-      color: #000;
-    }
+  const resolvedInvoiceId = propInvoiceId ?? routeInvoiceId
 
-    /* ── GSTIN band ── */
-    .gstin-band {
-      text-align: center;
-      border-bottom: 1.5px solid #000;
-      padding: 4px 16px;
-      font-weight: 700;
-      font-size: 12px;
-      letter-spacing: 0.5px;
-      background: #e8e8e8;
-      color: #000;
-    }
+  const [invoice, setInvoice] = useState<Invoice | null>(null)
+  const [company, setCompany] = useState<Company | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [downloading, setDownloading] = useState(false)
+  const printRef = useRef<HTMLDivElement>(null)
+  const downloadStartedRef = useRef(false)
+  const [qrCodeBase64, setQrCodeBase64] = useState('')
+  const [sigBase64, setSigBase64] = useState('')
 
-    /* ── Buyer + Invoice meta ── */
-    .billing-row {
-      display: flex;
-      border-bottom: 1.5px solid #000;
-      min-height: 110px;
-    }
-    .buyer-block {
-      flex: 1;
-      padding: 10px 14px;
-      border-right: 1.5px solid #000;
-      font-size: 11.5px;
-      line-height: 1.65;
-      color: #000;
-    }
-    .buyer-block .buyer-name {
-      font-weight: 700;
-      font-size: 12.5px;
-      margin-bottom: 2px;
-      color: #000;
-    }
-    .buyer-block .buyer-gstin {
-      font-weight: 700;
-      margin-top: 4px;
-      color: #000;
-    }
-    .meta-block {
-      width: 268px;
-      padding: 10px 14px;
-      font-size: 11.5px;
-      color: #000;
-    }
-    .meta-table { width: 100%; border-collapse: collapse; }
-    .meta-table td { padding: 2px 3px; vertical-align: top; color: #000; }
-    .meta-table .label { font-weight: 600; white-space: nowrap; }
-    .meta-table .colon { padding: 2px 4px; }
-    .meta-table .value { white-space: nowrap; }
-    .due-row td { font-weight: 700; padding-top: 3px; }
-
-    /* ── Item table ── */
-    .items-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 11px;
-      border-bottom: 1.5px solid #000;
-    }
-    .items-table thead tr {
-      background: #c8c8c8; /* matches header grey — crisp in B&W print */
-      border-bottom: 1.5px solid #000;
-    }
-    .items-table th {
-      padding: 5px 6px;
-      font-weight: 700;
-      text-align: center;
-      font-size: 10.5px;
-      border-right: 1px solid #000;
-      vertical-align: middle;
-      white-space: nowrap;
-      color: #000;
-    }
-    .items-table th:last-child { border-right: none; }
-    .items-table th.left { text-align: left; }
-    .items-table th.right { text-align: right; }
-
-    .items-table td {
-      padding: 4px 6px;
-      vertical-align: top;
-      border-right: 1px solid #000;
-      border-bottom: 1px solid #bbb;
-      font-size: 11px;
-      color: #000;
-    }
-    .items-table td:last-child { border-right: none; }
-    .items-table td.center { text-align: center; }
-    .items-table td.right { text-align: right; font-family: 'IBM Plex Mono', monospace; }
-    .items-table td.sn { text-align: center; width: 28px; }
-    .items-table td.product { min-width: 160px; }
-    .items-table td.hsn { text-align: center; width: 72px; }
-    .items-table td.qty { text-align: center; width: 42px; }
-    .items-table td.rate { text-align: right; width: 72px; font-family: 'IBM Plex Mono', monospace; }
-    .items-table td.gst-pct { text-align: center; width: 44px; }
-    .items-table td.amount { text-align: right; width: 82px; font-family: 'IBM Plex Mono', monospace; }
-
-    .item-remark { font-size: 10px; color: #333; margin-top: 2px; }
-    .empty-row { height: 20px; }
-
-    /* ── Footer ── */
-    .footer-row {
-      display: flex;
-      min-height: 160px;
-    }
-    .footer-left {
-      flex: 1;
-      border-right: 1.5px solid #000;
-      padding: 8px 12px;
-      font-size: 11px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      color: #000;
-    }
-    .gst-note { font-style: italic; margin-bottom: 6px; color: #000; }
-    .amount-words { font-weight: 700; font-size: 11.5px; margin-bottom: 10px; color: #000; }
-    .terms-block { margin-top: 6px; }
-    .terms-block .terms-title {
-      font-weight: 700;
-      text-decoration: underline;
-      font-size: 11px;
-      margin-bottom: 2px;
-      color: #000;
-    }
-    .terms-block .terms-text { font-size: 10px; color: #333; }
-    .receiver-sig { margin-top: 36px; font-size: 11px; font-weight: 600; border-top: 1px solid #000; padding-top: 4px; display: inline-block; color: #000; }
-
-    .footer-right {
-      width: 268px;
-      padding: 8px 12px;
-      font-size: 12px;
-      color: #000;
-    }
-    .totals-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-    .totals-table td { padding: 2.5px 0; color: #000; }
-    .totals-table .t-label { font-weight: 600; }
-    .totals-table .t-value { text-align: right; font-family: 'IBM Plex Mono', monospace; }
-    .totals-table .grand-row td {
-      font-weight: 900;
-      font-size: 13.5px;
-      padding-top: 5px;
-      border-top: 2px solid #000;
-      color: #000;
-    }
-    .totals-table .discount { color: #000; }
-
-    .authorised-block {
-      margin-top: 10px;
-      text-align: right;
-      font-size: 11px;
-      color: #000;
-    }
-    .authorised-block .for-co { font-weight: 700; margin-bottom: 38px; color: #000; }
-    .authorised-block .sig-line {
-      border-top: 1px solid #000;
-      padding-top: 4px;
-      font-size: 10.5px;
-      color: #333;
-    }
-
-    /* ── PAID watermark ── */
-    .watermark {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) rotate(-30deg);
-      font-size: 80px;
-      font-weight: 900;
-      color: rgba(0,0,0,0.07);
-      pointer-events: none;
-      user-select: none;
-      letter-spacing: 6px;
-      white-space: nowrap;
-      z-index: 0;
-    }
-
-    /* ── Print styles ── */
-    @media print {
-      body { background: #fff; padding: 0; margin: 0; }
-      .invoice-sheet {
-        box-shadow: none;
-        width: 100% !important;
-        min-height: auto;
-        border: 2px solid #000;
-        margin: 0 !important;
+  useEffect(() => {
+    // Convert asset URLs to base64 data URLs for off-screen rendering stability
+    const convertAssets = async () => {
+      try {
+        const qrBase = await toBase64(qrCodeUrl)
+        setQrCodeBase64(qrBase)
+      } catch (e) {
+        console.error('Failed to load QR code asset:', e)
       }
-      @page {
-        size: A4;
-        margin: 0.4in;
+      try {
+        const sigBase = await toBase64(signatureUrl)
+        setSigBase64(sigBase)
+      } catch (e) {
+        console.error('Failed to load signature asset:', e)
       }
     }
-  `;
+    convertAssets()
+  }, [])
+
+  useEffect(() => {
+    const load = async () => {
+      if (!resolvedInvoiceId) return
+      downloadStartedRef.current = false
+      setLoading(true)
+      try {
+        const [invRes, coRes] = await Promise.all([
+          client.get(`/invoices/${resolvedInvoiceId}/`),
+          client.get('/company/profile/'),
+        ])
+        setInvoice(invRes.data.data)
+        setCompany(coRes.data.data)
+      } catch (e: any) {
+        setError(e?.response?.data?.message ?? 'Failed to load invoice.')
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [resolvedInvoiceId])
+
+  // Build a self-contained HTML string from the rendered React tree
+  const buildPrintHTML = () => {
+    const node = printRef.current
+    if (!node) return ''
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>${invoice?.invoice_number ?? 'invoice'}</title>
+<style>${PRINT_CSS}</style>
+</head>
+<body>${node.innerHTML}</body>
+</html>`
+  }
+
+  // Download PDF via Electron IPC → main process printToPDF
+  const handleDownloadPDF = async () => {
+    if (!invoice || !company || downloading) return
+    setDownloading(true)
+    setError('')
+    try {
+      const html = buildPrintHTML()
+
+      if (window.electronAPI?.saveInvoicePDF) {
+        // Electron: main process opens headless window, prints to PDF, saves file
+        const result = await window.electronAPI.saveInvoicePDF(html, `${invoice.invoice_number}.pdf`)
+        if (result && !result.success && result.reason !== 'cancelled') {
+          setError(`PDF save failed: ${result.reason}`)
+          if (autoDownload) {
+            alert(`PDF save failed: ${result.reason}`)
+          }
+        }
+      } else {
+        // Dev browser fallback — open print dialog
+        openPrintWindow(html)
+      }
+    } catch (e: any) {
+      const errMsg = 'PDF generation failed: ' + (e?.message ?? '')
+      setError(errMsg)
+      if (autoDownload) {
+        alert(errMsg)
+      }
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  // Auto-download logic if autoDownload is set to true
+  useEffect(() => {
+    if (autoDownload && !loading && invoice && company && qrCodeBase64 && sigBase64) {
+      if (downloadStartedRef.current) return
+      downloadStartedRef.current = true
+
+      const runAutoDownload = async () => {
+        try {
+          await handleDownloadPDF()
+        } catch (e) {
+          console.error('Auto download failed:', e)
+        } finally {
+          onClose?.()
+        }
+      }
+      runAutoDownload()
+    }
+  }, [autoDownload, loading, invoice, company, qrCodeBase64, sigBase64])
+
+  const openPrintWindow = (html: string) => {
+    const w = window.open('', '_blank')
+    if (!w) return
+    w.document.open()
+    w.document.write(html)
+    w.document.close()
+    w.focus()
+    setTimeout(() => {
+      w.print()
+    }, 500)
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────
+  if (loading) {
+    if (autoDownload) return null
+    return (
+      <div className="page">
+        <div className="loading"><div className="spinner" /></div>
+      </div>
+    )
+  }
+
+  if (error && !invoice) {
+    if (autoDownload) {
+      return null
+    }
+    return (
+      <div className="page">
+        <div className="page-hdr">
+          <button className="btn btn-ghost btn-sm" onClick={() => (onClose ? onClose() : navigate(-1))}>
+            <ArrowLeft size={15} /> Back
+          </button>
+        </div>
+        <div className="empty">
+          <div className="empty-text">Could not load invoice</div>
+          <div className="empty-sub">{error}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!invoice || !company) return null
+
+  return (
+    <div
+      className="page"
+      style={autoDownload ? { display: 'none' } : { maxWidth: 860, margin: '0 auto' }}
+    >
+
+      {/* Toolbar */}
+      <div className="page-hdr">
+        <div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => (onClose ? onClose() : navigate(-1))}
+            style={{ marginBottom: 8 }}
+          >
+            <ArrowLeft size={15} /> Back
+          </button>
+          <div className="page-title">
+            {invoice.invoice_type === 'TAX' ? 'Tax Invoice' : 'Retail Invoice'}
+            &nbsp;
+            <span style={{ color: 'var(--primary)' }}>#{invoice.invoice_number}</span>
+          </div>
+          <div className="page-sub" style={{ marginTop: 4 }}>
+            {fmtDate(invoice.invoice_date)}
+            &nbsp;·&nbsp;
+            {invoice.customer_name}
+            &nbsp;·&nbsp;
+            <span style={{
+              color: invoice.payment_status === 'PAID'
+                ? 'var(--success)'
+                : invoice.payment_status === 'PARTIAL'
+                  ? 'var(--warning)'
+                  : 'var(--danger)'
+            }}>
+              {invoice.payment_status}
+            </span>
+          </div>
+        </div>
+
+        <div className="page-hdr-actions">
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => openPrintWindow(buildPrintHTML())}
+          >
+            <Printer size={14} /> Print
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleDownloadPDF}
+            disabled={downloading}
+          >
+            {downloading
+              ? <><div className="spinner spinner-sm" style={{ borderTopColor: '#fff' }} /> Generating…</>
+              : <><Download size={14} /> Download PDF</>
+            }
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="login-err" style={{ marginBottom: 16 }}>{error}</div>
+      )}
+
+      {/* Invoice preview — rendered with PRINT_CSS classes applied */}
+      <style>{PRINT_CSS.replace(/@page[^}]+}/g, '')}</style>
+
+      <div style={{
+        background: '#fff',
+        boxShadow: 'var(--sh-lg)',
+        borderRadius: 4,
+        padding: '8mm',
+        marginBottom: 32,
+        overflowX: 'auto',
+      }}>
+        {/* printRef captures the HTML that goes into the PDF */}
+        <div ref={printRef}>
+          <InvoiceDocument
+            invoice={invoice}
+            company={company}
+            qrCodeBase64={qrCodeBase64}
+            sigBase64={sigBase64}
+          />
+        </div>
+      </div>
+
+    </div>
+  )
 }
