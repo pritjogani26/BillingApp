@@ -10,7 +10,7 @@ class PaymentSerializer(serializers.Serializer):
     payment_date     = serializers.DateField(required=True)
     payment_method = serializers.ChoiceField(
         choices=['CASH', 'CHEQUE', 'NEFT', 'RTGS', 'UPI', 'BANK', 'CARD'],
-        default='BANK'
+        default='NEFT'
     )
     reference_number = serializers.CharField(max_length=255, required=False, allow_null=True, allow_blank=True)
     amount           = serializers.DecimalField(max_digits=12, decimal_places=2)
