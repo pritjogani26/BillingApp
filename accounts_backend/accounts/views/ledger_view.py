@@ -78,7 +78,7 @@ class LedgerEntriesView(generics.GenericAPIView):
 
         return common_response(
             StatusCode.OK.value,
-            get_message("Ledger entries fetched successfully"),
+            "Ledger entries fetched successfully",
             {
                 'customer':        CustomerSerializer(customer).data,
                 'opening_balance': opening_balance,
@@ -99,8 +99,7 @@ class OutstandingReportView(generics.GenericAPIView):
             """
             SELECT c.customer_id, c.customer_name, c.mobile,
                    COALESCE(SUM(i.due_amount), 0.00)              AS outstanding,
-                   COUNT(CASE WHEN i.payment_status = 'PENDING'
-                              THEN 1 END)::int                    AS pending_invoices
+                   COUNT(i.invoice_id)::int                    AS pending_invoices
             FROM   customers c
             LEFT   JOIN invoices i
                    ON  i.customer_id = c.customer_id
@@ -118,7 +117,7 @@ class OutstandingReportView(generics.GenericAPIView):
         serializer = self.get_serializer(rows, many=True)
         return common_response(
             StatusCode.OK.value,
-            get_message("Outstanding report fetched successfully"),
+            "Outstanding report fetched successfully",
             {
                 'count':       len(serializer.data),
                 'outstanding': serializer.data,

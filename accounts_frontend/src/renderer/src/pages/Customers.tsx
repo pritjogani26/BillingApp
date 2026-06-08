@@ -41,11 +41,26 @@ interface LedgerSummary {
   current_balance: number | string
 }
 
-const inr = (n: number | string | null | undefined) =>
-  n == null
-    ? '₹0'
-    : '₹' +
-      Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const inr = (n: number | string | null | undefined) => {
+  if (n == null) return '₹0'
+  const num = Number(n)
+  if (isNaN(num)) return '₹0'
+  return '₹' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const initialFormState = {
+  customer_name: '',
+  contact_person: '',
+  gstin: '',
+  pan_number: '',
+  address: '',
+  city: '',
+  state: '',
+  pincode: '',
+  mobile: '',
+  email: '',
+  default_rate: '0.00'
+}
 
 export default function Customers() {
   const queryClient = useQueryClient()
@@ -59,19 +74,6 @@ export default function Customers() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
 
   // Form State
-  const initialFormState = {
-    customer_name: '',
-    contact_person: '',
-    gstin: '',
-    pan_number: '',
-    address: '',
-    city: '',
-    state: '',
-    pincode: '',
-    mobile: '',
-    email: '',
-    default_rate: '0.00'
-  }
   const [form, setForm] = useState(initialFormState)
   const [formError, setFormError] = useState('')
 
@@ -87,7 +89,7 @@ export default function Customers() {
   const { data: customersData, isLoading: loadingCustomers, error: customersError } = useQuery({
     queryKey: ['customers', debouncedSearch],
     queryFn: async () => {
-      const res = await client.get(`/customers/?search=${debouncedSearch}`)
+      const res = await client.get(`/customers/?search=${encodeURIComponent(debouncedSearch)}`)
       return (res.data.data.customers || []) as Customer[]
     }
   })
@@ -111,6 +113,7 @@ export default function Customers() {
     },
     onSuccess: () => {
       setShowAddModal(false)
+      setForm(initialFormState)
       queryClient.invalidateQueries({ queryKey: ['customers'] })
     },
     onError: (err: any) => {
@@ -155,7 +158,21 @@ export default function Customers() {
   const formLoading = createCustomerMutation.isPending || updateCustomerMutation.isPending
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value })
+    let { name, value } = e.target
+
+    if (name === 'pincode') {
+      value = value.replace(/\D/g, '').slice(0, 6)
+    } else if (name === 'mobile') {
+      value = value.replace(/\D/g, '').slice(0, 20)
+    } else if (name === 'email') {
+      value = value.toLowerCase()
+    } else if (name === 'default_rate') {
+      // numeric rate field, leave untouched
+    } else {
+      value = value.toUpperCase()
+    }
+
+    setForm({ ...form, [name]: value })
     if (formError) setFormError('')
   }
 
@@ -214,6 +231,156 @@ export default function Customers() {
     setSelectedCustomer(c)
     setShowLedgerModal(true)
   }
+
+  const closeLedgerModal = () => {
+    setShowLedgerModal(false)
+    setSelectedCustomer(null)
+  }
+
+  const renderFormFields = () => (
+    <>
+      <div className="fgrp">
+        <label className="flabel">Company/Party Name *</label>
+        <input
+          className="finput"
+          name="customer_name"
+          value={form.customer_name}
+          onChange={handleInputChange}
+          placeholder="Enter official business name"
+          maxLength={255}
+          required
+        />
+      </div>
+
+      <div className="fgrid2">
+        <div className="fgrp">
+          <label className="flabel">Contact Person</label>
+          <input
+            className="finput"
+            name="contact_person"
+            value={form.contact_person}
+            onChange={handleInputChange}
+            placeholder="Person to contact"
+            maxLength={255}
+          />
+        </div>
+        <div className="fgrp">
+          <label className="flabel">Custom Rate (per unit)</label>
+          <input
+            className="finput"
+            name="default_rate"
+            type="number"
+            step="0.01"
+            min="0"
+            value={form.default_rate}
+            onChange={handleInputChange}
+            placeholder="0.00"
+          />
+        </div>
+      </div>
+
+      <div className="fgrid2">
+        <div className="fgrp">
+          <label className="flabel">Mobile No.</label>
+          <input
+            className="finput"
+            name="mobile"
+            value={form.mobile}
+            onChange={handleInputChange}
+            placeholder="10-digit mobile number"
+            maxLength={20}
+          />
+        </div>
+        <div className="fgrp">
+          <label className="flabel">Email Address</label>
+          <input
+            className="finput"
+            name="email"
+            type="email"
+            value={form.email}
+            onChange={handleInputChange}
+            placeholder="billing@client.com"
+            maxLength={255}
+          />
+        </div>
+      </div>
+
+      <div className="fgrid2">
+        <div className="fgrp">
+          <label className="flabel">GSTIN (15-digit)</label>
+          <input
+            className="finput"
+            name="gstin"
+            value={form.gstin}
+            onChange={handleInputChange}
+            placeholder="e.g. 27AAPFU0939F1ZV"
+            maxLength={15}
+          />
+        </div>
+        <div className="fgrp">
+          <label className="flabel">PAN Card No.</label>
+          <input
+            className="finput"
+            name="pan_number"
+            value={form.pan_number}
+            onChange={handleInputChange}
+            placeholder="e.g. AAPFU0939F"
+            maxLength={10}
+          />
+        </div>
+      </div>
+
+      <div className="fgrp">
+        <label className="flabel">Billing Address</label>
+        <textarea
+          className="finput"
+          name="address"
+          rows={2}
+          value={form.address}
+          onChange={handleInputChange}
+          placeholder="Enter building number, street, locality..."
+          maxLength={500}
+          style={{ resize: 'none', fontFamily: 'var(--font)' }}
+        />
+      </div>
+
+      <div className="fgrid2" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <div className="fgrp">
+          <label className="flabel">City</label>
+          <input
+            className="finput"
+            name="city"
+            value={form.city}
+            onChange={handleInputChange}
+            placeholder="City"
+            maxLength={100}
+          />
+        </div>
+        <div className="fgrp">
+          <label className="flabel">State</label>
+          <input
+            className="finput"
+            name="state"
+            value={form.state}
+            onChange={handleInputChange}
+            placeholder="State"
+            maxLength={100}
+          />
+        </div>
+        <div className="fgrp">
+          <label className="flabel">Pincode</label>
+          <input
+            className="finput"
+            name="pincode"
+            value={form.pincode}
+            onChange={handleInputChange}
+            placeholder="Pincode"
+            maxLength={6}
+          />
+        </div>
+      </div>
+    </>
+  )
 
   return (
     <>
@@ -286,9 +453,9 @@ export default function Customers() {
                   <tr key={c.customer_id}>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--t1)' }}>{c.customer_name}</div>
-                      {c.city && c.state && (
+                      {(c.city || c.state) && (
                         <div className="fs12 t3 row gap-1" style={{ marginTop: 2 }}>
-                          <MapPin size={11} /> {c.city}, {c.state}
+                          <MapPin size={11} /> {[c.city, c.state].filter(Boolean).join(', ')}
                         </div>
                       )}
                     </td>
@@ -357,6 +524,7 @@ export default function Customers() {
                           onClick={() => handleDeleteCustomer(c.customer_id)}
                           title="Delete Customer"
                           style={{ color: 'var(--danger)' }}
+                          disabled={deleteCustomerMutation.isPending}
                         >
                           <Trash2 size={13} />
                         </button>
@@ -388,136 +556,7 @@ export default function Customers() {
                     {formError}
                   </div>
                 )}
-
-                <div className="fgrp">
-                  <label className="flabel">Company/Party Name *</label>
-                  <input
-                    className="finput"
-                    name="customer_name"
-                    value={form.customer_name}
-                    onChange={handleInputChange}
-                    placeholder="Enter official business name"
-                    required
-                  />
-                </div>
-
-                <div className="fgrid2">
-                  <div className="fgrp">
-                    <label className="flabel">Contact Person</label>
-                    <input
-                      className="finput"
-                      name="contact_person"
-                      value={form.contact_person}
-                      onChange={handleInputChange}
-                      placeholder="Person to contact"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">Custom Rate (per unit)</label>
-                    <input
-                      className="finput"
-                      name="default_rate"
-                      type="number"
-                      step="0.01"
-                      value={form.default_rate}
-                      onChange={handleInputChange}
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-
-                <div className="fgrid2">
-                  <div className="fgrp">
-                    <label className="flabel">Mobile No.</label>
-                    <input
-                      className="finput"
-                      name="mobile"
-                      value={form.mobile}
-                      onChange={handleInputChange}
-                      placeholder="10-digit mobile number"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">Email Address</label>
-                    <input
-                      className="finput"
-                      name="email"
-                      type="email"
-                      value={form.email}
-                      onChange={handleInputChange}
-                      placeholder="billing@client.com"
-                    />
-                  </div>
-                </div>
-
-                <div className="fgrid2">
-                  <div className="fgrp">
-                    <label className="flabel">GSTIN (15-digit)</label>
-                    <input
-                      className="finput"
-                      name="gstin"
-                      value={form.gstin}
-                      onChange={handleInputChange}
-                      placeholder="e.g. 27AAPFU0939F1ZV"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">PAN Card No.</label>
-                    <input
-                      className="finput"
-                      name="pan_number"
-                      value={form.pan_number}
-                      onChange={handleInputChange}
-                      placeholder="e.g. AAPFU0939F"
-                    />
-                  </div>
-                </div>
-
-                <div className="fgrp">
-                  <label className="flabel">Billing Address</label>
-                  <textarea
-                    className="finput"
-                    name="address"
-                    rows={2}
-                    value={form.address}
-                    onChange={handleInputChange}
-                    placeholder="Enter building number, street, locality..."
-                    style={{ resize: 'none', fontFamily: 'var(--font)' }}
-                  />
-                </div>
-
-                <div className="fgrid2" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-                  <div className="fgrp">
-                    <label className="flabel">City</label>
-                    <input
-                      className="finput"
-                      name="city"
-                      value={form.city}
-                      onChange={handleInputChange}
-                      placeholder="City"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">State</label>
-                    <input
-                      className="finput"
-                      name="state"
-                      value={form.state}
-                      onChange={handleInputChange}
-                      placeholder="State"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">Pincode</label>
-                    <input
-                      className="finput"
-                      name="pincode"
-                      value={form.pincode}
-                      onChange={handleInputChange}
-                      placeholder="Pincode"
-                    />
-                  </div>
-                </div>
+                {renderFormFields()}
               </div>
 
               <div className="modal-ftr">
@@ -555,136 +594,7 @@ export default function Customers() {
                     {formError}
                   </div>
                 )}
-
-                <div className="fgrp">
-                  <label className="flabel">Company/Party Name *</label>
-                  <input
-                    className="finput"
-                    name="customer_name"
-                    value={form.customer_name}
-                    onChange={handleInputChange}
-                    placeholder="Enter official business name"
-                    required
-                  />
-                </div>
-
-                <div className="fgrid2">
-                  <div className="fgrp">
-                    <label className="flabel">Contact Person</label>
-                    <input
-                      className="finput"
-                      name="contact_person"
-                      value={form.contact_person}
-                      onChange={handleInputChange}
-                      placeholder="Person to contact"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">Custom Rate (per unit)</label>
-                    <input
-                      className="finput"
-                      name="default_rate"
-                      type="number"
-                      step="0.01"
-                      value={form.default_rate}
-                      onChange={handleInputChange}
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-
-                <div className="fgrid2">
-                  <div className="fgrp">
-                    <label className="flabel">Mobile No.</label>
-                    <input
-                      className="finput"
-                      name="mobile"
-                      value={form.mobile}
-                      onChange={handleInputChange}
-                      placeholder="10-digit mobile number"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">Email Address</label>
-                    <input
-                      className="finput"
-                      name="email"
-                      type="email"
-                      value={form.email}
-                      onChange={handleInputChange}
-                      placeholder="billing@client.com"
-                    />
-                  </div>
-                </div>
-
-                <div className="fgrid2">
-                  <div className="fgrp">
-                    <label className="flabel">GSTIN (15-digit)</label>
-                    <input
-                      className="finput"
-                      name="gstin"
-                      value={form.gstin}
-                      onChange={handleInputChange}
-                      placeholder="e.g. 27AAPFU0939F1ZV"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">PAN Card No.</label>
-                    <input
-                      className="finput"
-                      name="pan_number"
-                      value={form.pan_number}
-                      onChange={handleInputChange}
-                      placeholder="e.g. AAPFU0939F"
-                    />
-                  </div>
-                </div>
-
-                <div className="fgrp">
-                  <label className="flabel">Billing Address</label>
-                  <textarea
-                    className="finput"
-                    name="address"
-                    rows={2}
-                    value={form.address}
-                    onChange={handleInputChange}
-                    placeholder="Enter building number, street, locality..."
-                    style={{ resize: 'none', fontFamily: 'var(--font)' }}
-                  />
-                </div>
-
-                <div className="fgrid2" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-                  <div className="fgrp">
-                    <label className="flabel">City</label>
-                    <input
-                      className="finput"
-                      name="city"
-                      value={form.city}
-                      onChange={handleInputChange}
-                      placeholder="City"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">State</label>
-                    <input
-                      className="finput"
-                      name="state"
-                      value={form.state}
-                      onChange={handleInputChange}
-                      placeholder="State"
-                    />
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">Pincode</label>
-                    <input
-                      className="finput"
-                      name="pincode"
-                      value={form.pincode}
-                      onChange={handleInputChange}
-                      placeholder="Pincode"
-                    />
-                  </div>
-                </div>
+                {renderFormFields()}
               </div>
 
               <div className="modal-ftr">
@@ -714,7 +624,7 @@ export default function Customers() {
               </span>
               <button
                 className="tb-btn"
-                onClick={() => setShowLedgerModal(false)}
+                onClick={closeLedgerModal}
                 style={{ color: '#8898AA' }}
               >
                 <X size={15} />
@@ -834,7 +744,7 @@ export default function Customers() {
             <div className="modal-ftr">
               <button
                 className="btn btn-primary"
-                onClick={() => setShowLedgerModal(false)}
+                onClick={closeLedgerModal}
                 style={{ width: '100%', justifyContent: 'center' }}
               >
                 Close Summary

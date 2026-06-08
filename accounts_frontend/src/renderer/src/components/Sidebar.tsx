@@ -1,6 +1,4 @@
-// src/renderer/src/components/Sidebar.tsx
-
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
   Users,
@@ -35,18 +33,19 @@ const NAV: NavItem[] = [
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
-  const navigate = useNavigate()
 
   const initials = (user?.full_name || 'U')
     .split(' ')
+    .filter(Boolean)
     .map((w) => w[0])
     .join('')
     .slice(0, 2)
     .toUpperCase()
 
   const handleLogout = () => {
-    logout()
-    navigate('/login')
+    if (window.confirm('Are you sure you want to log out?')) {
+      logout()
+    }
   }
 
   return (
@@ -68,13 +67,15 @@ export default function Sidebar() {
       </nav>
 
       <div className="sb-footer">
-        <div className="sb-user" onClick={handleLogout} title="Logout">
+        <div className="sb-user">
           <div className="sb-avatar">{initials}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="sb-user-name">{user?.full_name || 'User'}</div>
-            <div className="sb-user-role">{user?.role || 'Staff'}</div>
+            <div className="sb-user-role">{user?.role || '—'}</div>
           </div>
-          <LogOut size={13} color="#2D4060" />
+          <button className="sb-logout-btn" onClick={handleLogout} title="Logout">
+            <LogOut size={13} color="#2D4060" />
+          </button>
         </div>
       </div>
     </aside>

@@ -59,7 +59,7 @@ export default function Products() {
   const { data: productsData, isLoading: loadingProducts, error: productsError } = useQuery({
     queryKey: ['products', debouncedSearch],
     queryFn: async () => {
-      const res = await client.get(`/products/?search=${debouncedSearch}`)
+      const res = await client.get(`/products/?search=${encodeURIComponent(debouncedSearch)}`)
       return (res.data.data.products || []) as Product[]
     }
   })
@@ -166,31 +166,31 @@ export default function Products() {
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.customer_id) {
-      setFormError('Customer selection is required.')
-      return
-    }
     if (!form.product_name.trim()) {
       setFormError('Product name is required.')
       return
     }
     setFormError('')
-    createProductMutation.mutate(form)
+    const payload = {
+      ...form,
+      customer_id: form.customer_id !== '' ? form.customer_id : null
+    }
+    createProductMutation.mutate(payload as typeof form)
   }
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault()
     if (!selected) return
-    if (!form.customer_id) {
-      setFormError('Customer selection is required.')
-      return
-    }
     if (!form.product_name.trim()) {
       setFormError('Product name is required.')
       return
     }
     setFormError('')
-    updateProductMutation.mutate({ id: selected.product_id, form })
+    const payload = {
+      ...form,
+      customer_id: form.customer_id !== '' ? form.customer_id : null
+    }
+    updateProductMutation.mutate({ id: selected.product_id, form: payload as typeof form })
   }
 
   const handleDelete = (id: number) => {

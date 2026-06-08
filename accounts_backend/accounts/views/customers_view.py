@@ -37,7 +37,7 @@ class CustomerListView(generics.GenericAPIView):
         serializer = self.get_serializer(rows, many=True)
         return common_response(
             StatusCode.OK.value,
-            get_message("Customers fetched successfully"),
+            "Customers fetched successfully",
             {
                 'count':     len(serializer.data),
                 'customers': serializer.data,
@@ -72,11 +72,11 @@ class CustomerListView(generics.GenericAPIView):
             """,
             (
                 company_id,
-                d['customer_name'],  d['contact_person'],
-                d['gstin'],          d['pan_number'],
-                d['address'],        d['city'],
-                d['state'],          d['pincode'],
-                d['mobile'],         d['email'],
+                d['customer_name'],  d.get('contact_person'),
+                d.get('gstin'),      d.get('pan_number'),
+                d.get('address'),    d.get('city'),
+                d.get('state'),      d.get('pincode'),
+                d.get('mobile'),     d.get('email'),
                 d.get('default_rate', 0.00),
                 user_id,
             )
@@ -117,7 +117,7 @@ class CustomerDetailView(generics.GenericAPIView):
 
         return common_response(
             StatusCode.OK.value,
-            get_message("Customer fetched successfully"),
+            "Customer fetched successfully",
             self.get_serializer(row).data
         )
 
@@ -147,11 +147,11 @@ class CustomerDetailView(generics.GenericAPIView):
             WHERE customer_id = %s AND company_id = %s AND status != 'D'
             """,
             (
-                d['customer_name'],  d['contact_person'],
-                d['gstin'],          d['pan_number'],
-                d['address'],        d['city'],
-                d['state'],          d['pincode'],
-                d['mobile'],         d['email'],
+                d['customer_name'],  d.get('contact_person'),
+                d.get('gstin'),      d.get('pan_number'),
+                d.get('address'),    d.get('city'),
+                d.get('state'),      d.get('pincode'),
+                d.get('mobile'),     d.get('email'),
                 d.get('default_rate', 0.00),
                 user_id, customer_id, company_id,
             )
@@ -233,6 +233,6 @@ class CustomerLedgerSummaryView(generics.GenericAPIView):
 
         return common_response(
             StatusCode.OK.value,
-            get_message("Customer ledger summary fetched successfully"),
+            "Customer ledger summary fetched successfully",
             self.get_serializer(row).data
         )

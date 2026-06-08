@@ -33,8 +33,8 @@ def _financial_year(date: datetime.date) -> str:
 def _next_invoice_number(invoice_type: str) -> str:
     """
     Atomically increments the correct sequence and returns a formatted number.
-    TAX    → T-MMYY-0001
-    RETAIL → R-MMYY-0001
+    TAX    → T-MMYY-00001
+    RETAIL → R-MMYY-00001
     """
     sequence_name = 'TAX_INVOICE' if invoice_type == 'TAX' else 'RETAIL_INVOICE'
     prefix        = 'T'           if invoice_type == 'TAX' else 'R'
@@ -51,7 +51,7 @@ def _next_invoice_number(invoice_type: str) -> str:
     seq    = row['current_number']
     today  = datetime.date.today()
     mmyy   = f"{today.month:02d}{str(today.year)[-2:]}"
-    return f"{prefix}-{mmyy}-{seq:04d}"
+    return f"{prefix}-{mmyy}-{seq:05d}"
 
 
 def _due_date(invoice_date: datetime.date) -> datetime.date:
@@ -182,7 +182,7 @@ class InvoiceListView(generics.GenericAPIView):
         serializer = self.get_serializer(rows, many=True)
         return common_response(
             StatusCode.OK.value,
-            get_message("Invoices fetched successfully"),
+            "Invoices fetched successfully",
             {
                 'count':    len(serializer.data),
                 'invoices': serializer.data,
@@ -430,7 +430,7 @@ class InvoiceDetailView(generics.GenericAPIView):
 
         return common_response(
             StatusCode.OK.value,
-            get_message("Invoice fetched successfully"),
+            "Invoice fetched successfully",
             self.get_serializer(inv).data
         )
 
@@ -672,6 +672,6 @@ class DashboardStatsView(generics.GenericAPIView):
 
         return common_response(
             StatusCode.OK.value,
-            get_message("Dashboard stats fetched successfully"),
+            "Dashboard stats fetched successfully",
             self.get_serializer(stats).data
         )

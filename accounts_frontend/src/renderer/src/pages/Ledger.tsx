@@ -84,19 +84,23 @@ export default function Ledger() {
   const { data: entriesData, isLoading: entriesLoading, error: entriesErrorQuery } = useQuery({
     queryKey: ['ledgerEntries', selectedCust?.customer_id, submittedFromDate, submittedToDate],
     queryFn: async () => {
-      if (!selectedCust) return []
+      if (!selectedCust) return { entries: [], opening_balance: 0 }
       const params = new URLSearchParams()
       if (submittedFromDate) params.set('from_date', submittedFromDate)
       if (submittedToDate) params.set('to_date', submittedToDate)
       const res = await client.get(`/ledger/${selectedCust.customer_id}/?${params}`)
-      return (res.data.data.entries || []) as LedgerEntry[]
+      return {
+        entries: (res.data.data.entries || []) as LedgerEntry[],
+        opening_balance: Number(res.data.data.opening_balance || 0)
+      }
     },
     enabled: tab === 'ledger' && !!selectedCust
   })
 
   const outstanding = outstandingData || []
   const customers = customersData || []
-  const entries = entriesData || []
+  const entries = entriesData?.entries || []
+  const openingBalance = entriesData?.opening_balance || 0
 
   const outError = outErrorQuery ? 'Failed to load outstanding.' : ''
   const entriesError = entriesErrorQuery ? 'Failed to load ledger entries.' : ''
@@ -133,6 +137,9 @@ export default function Ledger() {
   const filteredCusts = customers.filter(
     (c) => !search || c.customer_name.toLowerCase().includes(search.toLowerCase())
   )
+  const closingBalance = entries.length > 0
+    ? Number(entries[entries.length - 1].running_balance)
+    : openingBalance
 
   return (
     <>
@@ -444,6 +451,33 @@ export default function Ledger() {
                           </tr>
                         </thead>
                         <tbody>
+                          {submittedFromDate && (
+                            <tr>
+                              <td className="fs12 t2" style={{ whiteSpace: 'nowrap' }}>
+                                {fmt(submittedFromDate)}
+                              </td>
+                              <td>
+                                <span className="badge badge-gray">Opening</span>
+                              </td>
+                              <td>—</td>
+                              <td className="t2 fs12">Opening Balance</td>
+                              <td style={{ textAlign: 'right' }}>—</td>
+                              <td style={{ textAlign: 'right' }}>—</td>
+                              <td
+                                style={{
+                                  textAlign: 'right',
+                                  fontWeight: 700,
+                                  fontVariantNumeric: 'tabular-nums',
+                                  color:
+                                    openingBalance > 0
+                                      ? 'var(--danger)'
+                                      : 'var(--success)'
+                                }}
+                              >
+                                {inr(openingBalance)}
+                              </td>
+                            </tr>
+                          )}
                           {entries.map((e) => (
                             <tr key={e.entry_id}>
                               <td className="fs12 t2" style={{ whiteSpace: 'nowrap' }}>
@@ -532,13 +566,10 @@ export default function Ledger() {
                             style={{
                               fontWeight: 800,
                               fontSize: 15,
-                              color:
-                                Number(entries[entries.length - 1]?.running_balance) > 0
-                                  ? 'var(--danger)'
-                                  : 'var(--success)'
+                              color: closingBalance > 0 ? 'var(--danger)' : 'var(--success)'
                             }}
                           >
-                            {inr(entries[entries.length - 1]?.running_balance)}
+                            {inr(closingBalance)}
                           </span>
                         </div>
                       </div>

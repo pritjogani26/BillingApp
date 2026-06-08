@@ -1,8 +1,9 @@
 // src/renderer/src/pages/Reports.tsx
 
-import { useState, Fragment } from 'react'
+import { useState, Fragment, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, BarChart2, RefreshCw, Download } from 'lucide-react'
+import axios from 'axios'
 import client from '../api/client'
 
 /* ── Types ── */
@@ -40,7 +41,6 @@ interface GSTR1Row {
 
 interface HSNRow {
   hsn_code: string
-  product_name: string
   total_qty: number | string
   taxable_value: number | string
   cgst: number | string
@@ -166,8 +166,8 @@ export default function Reports() {
   // Queries
   const { data: gstSummaryData, isLoading: loadingGst, error: errorGst } = useQuery({
     queryKey: ['gstSummary', submittedMonth, submittedYear],
-    queryFn: async () => {
-      const res = await client.get(`/reports/gst-summary/?month=${submittedMonth}&year=${submittedYear}`)
+    queryFn: async ({ signal }) => {
+      const res = await client.get(`/reports/gst-summary/?month=${submittedMonth}&year=${submittedYear}`, { signal })
       return res.data.data as GSTSummary
     },
     enabled: tab === 'gst-summary' && submittedTab === 'gst-summary'
@@ -175,8 +175,8 @@ export default function Reports() {
 
   const { data: gstr1Data, isLoading: loadingGstr1, error: errorGstr1 } = useQuery({
     queryKey: ['gstr1', submittedMonth, submittedYear],
-    queryFn: async () => {
-      const res = await client.get(`/reports/gstr1/?month=${submittedMonth}&year=${submittedYear}`)
+    queryFn: async ({ signal }) => {
+      const res = await client.get(`/reports/gstr1/?month=${submittedMonth}&year=${submittedYear}`, { signal })
       return (res.data.data.gstr1 || []) as GSTR1Row[]
     },
     enabled: tab === 'gstr1' && submittedTab === 'gstr1'
@@ -184,8 +184,8 @@ export default function Reports() {
 
   const { data: hsnData, isLoading: loadingHsn, error: errorHsn } = useQuery({
     queryKey: ['hsnSummary', submittedMonth, submittedYear],
-    queryFn: async () => {
-      const res = await client.get(`/reports/hsn-summary/?month=${submittedMonth}&year=${submittedYear}`)
+    queryFn: async ({ signal }) => {
+      const res = await client.get(`/reports/hsn-summary/?month=${submittedMonth}&year=${submittedYear}`, { signal })
       return (res.data.data.hsn_summary || []) as HSNRow[]
     },
     enabled: tab === 'hsn' && submittedTab === 'hsn'
@@ -193,8 +193,8 @@ export default function Reports() {
 
   const { data: monthlyData, isLoading: loadingMonthly, error: errorMonthly } = useQuery({
     queryKey: ['monthlySales'],
-    queryFn: async () => {
-      const res = await client.get('/reports/monthly-sales/')
+    queryFn: async ({ signal }) => {
+      const res = await client.get('/reports/monthly-sales/', { signal })
       return (res.data.data.monthly_sales || []) as MonthlySalesRow[]
     },
     enabled: tab === 'monthly' && submittedTab === 'monthly'
@@ -209,13 +209,31 @@ export default function Reports() {
   }
 
   const [downloadingExcel, setDownloadingExcel] = useState(false)
+  const excelAbortControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (excelAbortControllerRef.current) {
+        excelAbortControllerRef.current.abort()
+      }
+    }
+  }, [])
 
   const handleDownloadExcel = async () => {
+    if (excelAbortControllerRef.current) {
+      excelAbortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    excelAbortControllerRef.current = controller
+
     setDownloadingExcel(true)
     try {
       const response = await client.get(
         `/reports/gstr1/download/?month=${submittedMonth}&year=${submittedYear}`,
-        { responseType: 'blob' }
+        {
+          responseType: 'blob',
+          signal: controller.signal
+        }
       )
 
       const blob = new Blob([response.data], {
@@ -241,8 +259,10 @@ export default function Reports() {
       link.parentNode?.removeChild(link)
       window.URL.revokeObjectURL(url)
     } catch (e: any) {
-      console.error('Failed to download Excel report:', e)
-      alert('Failed to download Excel report.')
+      if (!axios.isCancel(e)) {
+        console.error('Failed to download Excel report:', e)
+        alert('Failed to download Excel report.')
+      }
     } finally {
       setDownloadingExcel(false)
     }
@@ -553,7 +573,7 @@ export default function Reports() {
         <div className="card" style={{ animation: 'fadeUp 0.3s ease' }}>
           <div className="card-hdr">
             <span className="card-title">
-              GST Summary — {month === 0 ? 'Full Year' : MONTHS[month - 1]} {year}
+              GST Summary — {submittedMonth === 0 ? 'Full Year' : MONTHS[submittedMonth - 1]} {submittedYear}
             </span>
           </div>
           <div
@@ -777,7 +797,7 @@ export default function Reports() {
         <div className="card" style={{ animation: 'fadeUp 0.3s ease' }}>
           <div className="card-hdr">
             <span className="card-title">
-              HSN Summary — {month === 0 ? 'Full Year' : MONTHS[month - 1]} {year}
+              HSN Summary — {submittedMonth === 0 ? 'Full Year' : MONTHS[submittedMonth - 1]} {submittedYear}
             </span>
             <span className="fs12 t3 fw6">{hsnRows.length} HSN Code(s)</span>
           </div>
@@ -791,7 +811,6 @@ export default function Reports() {
                 <thead>
                   <tr>
                     <th>HSN Code</th>
-                    <th>Product / Service</th>
                     <th style={{ textAlign: 'right' }}>Total Qty</th>
                     <th style={{ textAlign: 'right' }}>Taxable Value</th>
                     <th style={{ textAlign: 'right' }}>CGST</th>
@@ -802,17 +821,16 @@ export default function Reports() {
                 </thead>
                 <tbody>
                   {hsnRows.map((r) => (
-                    <tr key={r.hsn_code || r.product_name}>
+                    <tr key={r.hsn_code}>
                       <td>
-                        {r.hsn_code ? (
+                        {r.hsn_code && r.hsn_code !== 'N/A' ? (
                           <span className="badge badge-blue" style={{ fontFamily: 'monospace' }}>
                             {r.hsn_code}
                           </span>
                         ) : (
-                          <span className="t3 fs12">—</span>
+                          <span className="t3 fs12">N/A</span>
                         )}
                       </td>
-                      <td style={{ fontWeight: 500 }}>{r.product_name}</td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                         {Number(r.total_qty).toFixed(2)}
                       </td>
@@ -842,7 +860,7 @@ export default function Reports() {
                 </tbody>
                 <tfoot>
                   <tr style={{ background: '#F8FAFC', fontWeight: 700 }}>
-                    <td colSpan={3} style={{ padding: '10px 16px' }}>
+                    <td colSpan={2} style={{ padding: '10px 16px' }}>
                       Total
                     </td>
                     <td

@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Download, Printer } from 'lucide-react'
+import axios from 'axios'
 import client from '../api/client'
 import qrCodeUrl from '../assets/qr_code.jpeg'
 import signatureUrl from '../assets/signature.jpg'
@@ -191,8 +192,8 @@ body {
 .items-table th:last-child, .items-table td:last-child { border-right: none; }
 .items-table thead tr:first-child th { border-top: none; }
 .items-table thead th { font-family: Arial, Helvetica, sans-serif; font-weight: bold; text-align: center; font-size: 7pt; }
-.items-table tbody td { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; height: 28px; border-top: none; border-bottom: none; }
-.items-table tbody tr.empty-row td { height: 28px; }
+.items-table tbody td { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; height: 24px; border-top: none; border-bottom: none; }
+.items-table tbody tr.empty-row td { height: 24px; }
 .items-table tbody tr.filler-row td { height: auto; }
 .num { text-align: right; }
 .cen { text-align: center; }
@@ -261,7 +262,7 @@ function InvoiceDocument({
   const roundOff = parseFloat(invoice.round_off ?? '0')
   const grandTotal = parseFloat(invoice.grand_total ?? '0')
 
-  const emptyRows = Math.max(0, 12 - (invoice.items?.length ?? 0))
+  const emptyRows = Math.max(0, 18 - (invoice.items?.length ?? 0)) //----------------------------------------------------------------------------------------------------------------------------------------------
   const invoiceTypeLabel = isTax ? 'TAX INVOICE' : 'RETAIL INVOICE'
 
   let gstNote = ''
@@ -533,24 +534,30 @@ export default function InvoicePrint({
   }, [])
 
   useEffect(() => {
+    const controller = new AbortController()
     const load = async () => {
       if (!resolvedInvoiceId) return
       downloadStartedRef.current = false
       setLoading(true)
       try {
         const [invRes, coRes] = await Promise.all([
-          client.get(`/invoices/${resolvedInvoiceId}/`),
-          client.get('/company/profile/'),
+          client.get(`/invoices/${resolvedInvoiceId}/`, { signal: controller.signal }),
+          client.get('/company/profile/', { signal: controller.signal }),
         ])
         setInvoice(invRes.data.data)
         setCompany(coRes.data.data)
       } catch (e: any) {
-        setError(e?.response?.data?.message ?? 'Failed to load invoice.')
+        if (!axios.isCancel(e)) {
+          setError(e?.response?.data?.message ?? 'Failed to load invoice.')
+        }
       } finally {
         setLoading(false)
       }
     }
     load()
+    return () => {
+      controller.abort()
+    }
   }, [resolvedInvoiceId])
 
   // Build a self-contained HTML string from the rendered React tree

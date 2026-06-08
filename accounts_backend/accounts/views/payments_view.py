@@ -83,7 +83,7 @@ class PaymentListView(generics.GenericAPIView):
         serializer = self.get_serializer(rows, many=True)
         return common_response(
             StatusCode.OK.value,
-            get_message("Payments fetched successfully"),
+            "Payments fetched successfully",
             {
                 'count':    len(serializer.data),
                 'payments': serializer.data,
@@ -233,6 +233,6 @@ class PaymentDetailView(generics.GenericAPIView):
 
         return common_response(
             StatusCode.OK.value,
-            get_message("Payment fetched successfully"),
+            "Payment fetched successfully",
             self.get_serializer(row).data
         )

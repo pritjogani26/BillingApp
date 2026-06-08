@@ -39,6 +39,7 @@ interface InvoiceItem {
 
 interface Invoice {
   invoice_id: number
+  company_id: number
   invoice_number: string
   invoice_type: string
   invoice_date: string
@@ -67,7 +68,7 @@ const inr = (n: number | string | null | undefined) =>
   n == null
     ? '₹0.00'
     : '₹' +
-      Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const fmt = (d: string) =>
   new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -314,7 +315,7 @@ export default function Invoices() {
           }
         }
       } else {
-        ;(next[idx] as any)[field] = val
+        ; (next[idx] as any)[field] = val
       }
       return next
     })
@@ -380,7 +381,7 @@ export default function Invoices() {
     setPayForm({
       amount: String(Number(detailInv.due_amount).toFixed(2)),
       payment_date: new Date().toISOString().slice(0, 10),
-      payment_method: 'BANK',
+      payment_method: 'NEFT',
       reference_number: '',
       notes: ''
     })
@@ -399,6 +400,8 @@ export default function Invoices() {
     setPayError('')
     createPaymentMutation.mutate({
       invoice_id: detailInv.invoice_id,
+      company_id: detailInv.company_id,
+      customer_id: detailInv.customer_id,
       ...payForm
     })
   }
@@ -1087,7 +1090,7 @@ export default function Invoices() {
                       <div className="row jc-sb" style={{ marginBottom: 5 }}>
                         <span className="t2 fs12">Type</span>
                         <span
-                          className={`badge ${detailInv.invoice_type === 'GST' ? 'badge-blue' : 'badge-yellow'}`}
+                          className={`badge ${detailInv.invoice_type === 'TAX' ? 'badge-blue' : 'badge-yellow'}`}
                           style={{ padding: '2px 8px' }}
                         >
                           {detailInv.invoice_type}
@@ -1247,8 +1250,8 @@ export default function Invoices() {
                               >
                                 {inr(
                                   Number(it.cgst_amount || 0) +
-                                    Number(it.sgst_amount || 0) +
-                                    Number(it.igst_amount || 0)
+                                  Number(it.sgst_amount || 0) +
+                                  Number(it.igst_amount || 0)
                                 )}
                               </td>
                               <td
@@ -1429,11 +1432,13 @@ export default function Invoices() {
                       value={payForm.payment_method}
                       onChange={(e) => setPayForm({ ...payForm, payment_method: e.target.value })}
                     >
+                      <option value="NEFT">NEFT</option>
                       <option value="BANK">Bank Transfer</option>
+                      <option value="RTGS">RTGS</option>
                       <option value="CHEQUE">Cheque</option>
                       <option value="UPI">UPI</option>
                       <option value="CASH">Cash</option>
-                      
+                      <option value="CARD">Card</option>
                     </select>
                   </div>
                   <div className="fgrp">

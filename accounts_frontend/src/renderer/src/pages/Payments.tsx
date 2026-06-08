@@ -37,10 +37,13 @@ const fmt = (d: string) =>
 
 const MethodIcon = ({ method }: { method: string }) => {
   const map: Record<string, { icon: React.ReactNode; cls: string; label: string }> = {
-    CASH: { icon: <Wallet size={12} />, cls: 'badge-green', label: 'Cash' },
-    BANK: { icon: <Building2 size={12} />, cls: 'badge-blue', label: 'Bank' },
-    UPI: { icon: <Smartphone size={12} />, cls: 'badge-yellow', label: 'UPI' },
-    CHEQUE: { icon: <FileCheck size={12} />, cls: 'badge-red', label: 'Cheque' }
+    CASH:   { icon: <Wallet size={12} />,    cls: 'badge-green',  label: 'Cash'   },
+    BANK:   { icon: <Building2 size={12} />, cls: 'badge-blue',   label: 'Bank'   },
+    NEFT:   { icon: <Building2 size={12} />, cls: 'badge-blue',   label: 'NEFT'   },
+    RTGS:   { icon: <Building2 size={12} />, cls: 'badge-blue',   label: 'RTGS'   },
+    UPI:    { icon: <Smartphone size={12} />, cls: 'badge-yellow', label: 'UPI'   },
+    CHEQUE: { icon: <FileCheck size={12} />, cls: 'badge-red',    label: 'Cheque' },
+    CARD:   { icon: <CreditCard size={12} />, cls: 'badge-blue',  label: 'Card'  }
   }
   const m = map[method] || { icon: <CreditCard size={12} />, cls: 'badge-blue', label: method }
   return (
@@ -102,13 +105,13 @@ export default function Payments() {
           { label: 'Total Receipts', value: filtered.length, sub: 'filtered' },
           { label: 'Total Received', value: inr(totalReceived), sub: 'filtered sum' },
           {
-            label: 'Cash / Bank',
-            value: filtered.filter((p) => ['CASH', 'BANK'].includes(p.payment_method)).length,
+            label: 'Cash / Bank / NEFT / RTGS',
+            value: filtered.filter((p) => ['CASH', 'BANK', 'NEFT', 'RTGS'].includes(p.payment_method)).length,
             sub: 'transactions'
           },
           {
-            label: 'UPI / Cheque',
-            value: filtered.filter((p) => ['UPI', 'CHEQUE'].includes(p.payment_method)).length,
+            label: 'UPI / Cheque / Card',
+            value: filtered.filter((p) => ['UPI', 'CHEQUE', 'CARD'].includes(p.payment_method)).length,
             sub: 'transactions'
           }
         ].map((s, i) => (
@@ -144,8 +147,11 @@ export default function Payments() {
               <option value="">All Methods</option>
               <option value="CASH">Cash</option>
               <option value="BANK">Bank Transfer</option>
+              <option value="NEFT">NEFT</option>
+              <option value="RTGS">RTGS</option>
               <option value="UPI">UPI</option>
               <option value="CHEQUE">Cheque</option>
+              <option value="CARD">Card</option>
             </select>
           </div>
           <span className="fs12 t3 fw6">{filtered.length} Payment(s)</span>

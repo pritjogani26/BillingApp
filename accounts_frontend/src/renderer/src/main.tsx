@@ -1,3 +1,4 @@
+// accounts_frontend\src\renderer\src\main.tsx
 import './index.css'
 
 import { StrictMode } from 'react'

@@ -243,7 +243,7 @@ class GSTSummaryView(generics.GenericAPIView):
 
         return common_response(
             StatusCode.OK.value,
-            get_message("GST summary fetched successfully"),
+            "GST summary fetched successfully",
             self.get_serializer(row).data
         )
 
@@ -262,7 +262,7 @@ class GSTR1View(generics.GenericAPIView):
         serializer = self.get_serializer(rows, many=True)
         return common_response(
             StatusCode.OK.value,
-            get_message("GSTR-1 report fetched successfully"),
+            "GSTR-1 report fetched successfully",
             {
                 'count': len(serializer.data),
                 'gstr1': serializer.data,
@@ -284,7 +284,7 @@ class HSNSummaryView(generics.GenericAPIView):
         serializer = self.get_serializer(rows, many=True)
         return common_response(
             StatusCode.OK.value,
-            get_message("HSN summary fetched successfully"),
+            "HSN summary fetched successfully",
             {'hsn_summary': serializer.data}
         )
 
@@ -317,7 +317,7 @@ class MonthlySalesView(generics.GenericAPIView):
         serializer = self.get_serializer(rows, many=True)
         return common_response(
             StatusCode.OK.value,
-            get_message("Monthly sales trend fetched successfully"),
+            "Monthly sales trend fetched successfully",
             {'monthly_sales': serializer.data}
         )
 

@@ -132,10 +132,9 @@ class CurrentUserView(generics.GenericAPIView):
                 u.company_id,
                 u.username,
                 u.full_name,
-                u.status,
-                u.created_at,
                 r.role_name     AS role,
                 c.company_name,
+                c.gstin,
                 u.created_at,
                 u.updated_at
             FROM   users u

@@ -36,11 +36,12 @@ class CompanyProfileView(generics.GenericAPIView):
                 get_message("NOT_FOUND", "Company")
             )
 
-        serializer = self.get_serializer(row)
+        serializer = self.get_serializer(data=row)
+        serializer.is_valid(raise_exception=True)
 
         return common_response(
             StatusCode.OK.value,
-            get_message("Company profile fetched successfully"),
+            get_message("SAVED", "Company"),
             serializer.data
         )
 

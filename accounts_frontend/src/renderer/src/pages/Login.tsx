@@ -1,3 +1,4 @@
+// accounts_frontend\src\renderer\src\pages\Login.tsx
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react'
@@ -22,25 +23,9 @@ export default function Login() {
       const res = await client.post('/auth/login/', credentials)
       return res.data.data
     },
-    onSuccess: async (data) => {
-      const token = data.token
-      // Temporarily store the token so the request interceptor attaches it
-      localStorage.setItem('token', token)
-
-      try {
-        // Fetch complete user profile details (e.g. company_id, company_name)
-        const meRes = await client.get('/auth/me/')
-        if (meRes.data.success) {
-          login(token, meRes.data.data)
-          navigate('/', { replace: true })
-        } else {
-          localStorage.removeItem('token')
-          setError(meRes.data.message || 'Failed to fetch user profile.')
-        }
-      } catch (meErr: any) {
-        localStorage.removeItem('token')
-        setError(meErr.response?.data?.message || 'Failed to retrieve profile details.')
-      }
+    onSuccess: (data) => {
+      login(data.token, data.user || null)
+      navigate('/', { replace: true })
     },
     onError: (err: any) => {
       setError(
@@ -54,12 +39,14 @@ export default function Login() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.username.trim() || !form.password) {
+    const trimmedUsername = form.username.trim()
+    const trimmedPassword = form.password.trim()
+    if (!trimmedUsername || !trimmedPassword) {
       setError('Username and password are required.')
       return
     }
     setError('')
-    loginMutation.mutate(form)
+    loginMutation.mutate({ username: trimmedUsername, password: trimmedPassword })
   }
 
   return (
@@ -117,6 +104,7 @@ export default function Login() {
                 onChange={onChange}
                 placeholder="Enter your username"
                 autoComplete="username"
+                maxLength={100}
                 autoFocus
               />
             </div>
@@ -126,13 +114,14 @@ export default function Login() {
               <div className="pw-wrap">
                 <input
                   className="finput"
-                  type={showPwd ? 'text' : 'password'}
+                  type="password"
                   name="password"
                   value={form.password}
                   onChange={onChange}
                   placeholder="Enter your password"
                   autoComplete="current-password"
-                  style={{ paddingRight: 40 }}
+                  maxLength={128}
+                  style={{ paddingRight: 40, WebkitTextSecurity: showPwd ? 'none' : 'disc' } as React.CSSProperties}
                 />
                 <button
                   type="button"

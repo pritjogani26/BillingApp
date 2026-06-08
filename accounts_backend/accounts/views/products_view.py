@@ -36,7 +36,7 @@ class ProductListView(generics.GenericAPIView):
         serializer = self.get_serializer(rows, many=True)
         return common_response(
             StatusCode.OK.value,
-            get_message("Products fetched successfully"),
+            "Products fetched successfully",
             {
                 'count':    len(serializer.data),
                 'products': serializer.data,
@@ -111,7 +111,7 @@ class ProductDetailView(generics.GenericAPIView):
 
         return common_response(
             StatusCode.OK.value,
-            get_message("Product fetched successfully"),
+            "Product fetched successfully",
             self.get_serializer(row).data
         )
 

@@ -29,7 +29,6 @@ interface CompanyData {
   bank_name: string
   account_number: string
   ifsc_code: string
-  invoice_prefix: string
 }
 
 export default function Settings() {
@@ -38,7 +37,6 @@ export default function Settings() {
 
   const queryClient = useQueryClient()
 
-  // Company Profile states
   const [isEditingCompany, setIsEditingCompany] = useState(false)
   const [companyForm, setCompanyForm] = useState<CompanyData>({
     company_name: '',
@@ -52,18 +50,9 @@ export default function Settings() {
     email: '',
     bank_name: '',
     account_number: '',
-    ifsc_code: '',
-    invoice_prefix: ''
+    ifsc_code: ''
   })
 
-  // User Profile states
-  const [isEditingUser, setIsEditingUser] = useState(false)
-  const [userForm, setUserForm] = useState({
-    full_name: user?.full_name || '',
-    username: user?.username || ''
-  })
-
-  // Change Password states
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -92,7 +81,7 @@ export default function Settings() {
   // Mutations
   const updateCompanyMutation = useMutation({
     mutationFn: async (updatedData: CompanyData) => {
-      const res = await client.put('/company/profile/update/', updatedData)
+      const res = await client.put('/company/profile/', updatedData)
       return res.data
     },
     onSuccess: () => {
@@ -121,11 +110,22 @@ export default function Settings() {
     }
   })
 
-  const loading = loadingCompany || updateCompanyMutation.isPending || changePasswordMutation.isPending
-
   const startEditingCompany = () => {
     if (company) {
-      setCompanyForm(company)
+      setCompanyForm({
+        company_name: company.company_name ?? '',
+        gstin: company.gstin ?? '',
+        pan_number: company.pan_number ?? '',
+        address: company.address ?? '',
+        city: company.city ?? '',
+        state: company.state ?? '',
+        pincode: company.pincode ?? '',
+        phone: company.phone ?? '',
+        email: company.email ?? '',
+        bank_name: company.bank_name ?? '',
+        account_number: company.account_number ?? '',
+        ifsc_code: company.ifsc_code ?? ''
+      })
     }
     setIsEditingCompany(true)
   }
@@ -134,14 +134,6 @@ export default function Settings() {
   const handleCompanySave = (e: React.FormEvent) => {
     e.preventDefault()
     updateCompanyMutation.mutate(companyForm)
-  }
-
-  // Handle User Save
-  const handleUserSave = (e: React.FormEvent) => {
-    e.preventDefault()
-    // Simulate updating user profile (since there is no direct endpoint in views yet)
-    setIsEditingUser(false)
-    showNotification('success', 'User profile details mock-saved successfully')
   }
 
   // Handle Password Save
@@ -219,72 +211,54 @@ export default function Settings() {
             Subsections
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <button
-              onClick={() => setActiveTab('company')}
-              className="btn btn-ghost"
-              style={{
-                justifyContent: 'flex-start',
-                width: '100%',
-                background: activeTab === 'company' ? 'var(--bg)' : 'transparent',
-                color: activeTab === 'company' ? 'var(--primary)' : 'var(--t2)',
-                fontWeight: activeTab === 'company' ? 600 : 400
-              }}
-            >
-              <Store size={16} style={{ color: activeTab === 'company' ? 'var(--primary)' : 'var(--t3)' }} />
-              Company Profile
-            </button>
-            <button
-              onClick={() => setActiveTab('user')}
-              className="btn btn-ghost"
-              style={{
-                justifyContent: 'flex-start',
-                width: '100%',
-                background: activeTab === 'user' ? 'var(--bg)' : 'transparent',
-                color: activeTab === 'user' ? 'var(--primary)' : 'var(--t2)',
-                fontWeight: activeTab === 'user' ? 600 : 400
-              }}
-            >
-              <User size={16} style={{ color: activeTab === 'user' ? 'var(--primary)' : 'var(--t3)' }} />
-              User Profile
-            </button>
-            <button
-              onClick={() => setActiveTab('password')}
-              className="btn btn-ghost"
-              style={{
-                justifyContent: 'flex-start',
-                width: '100%',
-                background: activeTab === 'password' ? 'var(--bg)' : 'transparent',
-                color: activeTab === 'password' ? 'var(--primary)' : 'var(--t2)',
-                fontWeight: activeTab === 'password' ? 600 : 400
-              }}
-            >
-              <Lock size={16} style={{ color: activeTab === 'password' ? 'var(--primary)' : 'var(--t3)' }} />
-              Change Password
-            </button>
+            {([
+              { key: 'company', icon: Store, label: 'Company Profile' },
+              { key: 'user', icon: User, label: 'User Profile' },
+              { key: 'password', icon: Lock, label: 'Change Password' }
+            ] as const).map(({ key, icon: Icon, label }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className="btn btn-ghost"
+                style={{
+                  justifyContent: 'flex-start',
+                  width: '100%',
+                  background: activeTab === key ? 'var(--bg)' : 'transparent',
+                  color: activeTab === key ? 'var(--primary)' : 'var(--t2)',
+                  fontWeight: activeTab === key ? 600 : 400
+                }}
+              >
+                <Icon
+                  size={16}
+                  style={{ color: activeTab === key ? 'var(--primary)' : 'var(--t3)' }}
+                />
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Subsection Content */}
         <div className="card">
-          {loading && (
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                background: 'rgba(255,255,255,0.7)',
-                zIndex: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <div className="spinner" />
-            </div>
-          )}
-
           {/* 1) COMPANY PROFILE */}
           {activeTab === 'company' && (
-            <div>
+            <div style={{ position: 'relative' }}>
+              {(loadingCompany || updateCompanyMutation.isPending) && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    background: 'rgba(255,255,255,0.7)',
+                    zIndex: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <div className="spinner" />
+                </div>
+              )}
+
               <div className="card-hdr" style={{ background: '#f8fafc' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Building size={18} color="var(--primary)" />
@@ -314,7 +288,7 @@ export default function Settings() {
                           required
                           value={companyForm.company_name}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, company_name: e.target.value })
+                            setCompanyForm({ ...companyForm, company_name: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -324,9 +298,10 @@ export default function Settings() {
                           type="text"
                           className="finput"
                           required
+                          maxLength={15}
                           value={companyForm.gstin}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, gstin: e.target.value })
+                            setCompanyForm({ ...companyForm, gstin: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -336,9 +311,10 @@ export default function Settings() {
                           type="text"
                           className="finput"
                           required
+                          maxLength={10}
                           value={companyForm.pan_number}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, pan_number: e.target.value })
+                            setCompanyForm({ ...companyForm, pan_number: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -351,7 +327,7 @@ export default function Settings() {
                           required
                           value={companyForm.address}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, address: e.target.value })
+                            setCompanyForm({ ...companyForm, address: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -363,7 +339,7 @@ export default function Settings() {
                           required
                           value={companyForm.city}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, city: e.target.value })
+                            setCompanyForm({ ...companyForm, city: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -375,7 +351,7 @@ export default function Settings() {
                           required
                           value={companyForm.state}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, state: e.target.value })
+                            setCompanyForm({ ...companyForm, state: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -385,22 +361,10 @@ export default function Settings() {
                           type="text"
                           className="finput"
                           required
+                          maxLength={6}
                           value={companyForm.pincode}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, pincode: e.target.value })
-                          }
-                        />
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">Invoice Number Prefix</label>
-                        <input
-                          type="text"
-                          className="finput"
-                          required
-                          placeholder="e.g. INV"
-                          value={companyForm.invoice_prefix}
-                          onChange={(e) =>
-                            setCompanyForm({ ...companyForm, invoice_prefix: e.target.value })
+                            setCompanyForm({ ...companyForm, pincode: e.target.value.replace(/\D/g, '') })
                           }
                         />
                       </div>
@@ -410,9 +374,10 @@ export default function Settings() {
                           type="text"
                           className="finput"
                           required
+                          maxLength={20}
                           value={companyForm.phone}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, phone: e.target.value })
+                            setCompanyForm({ ...companyForm, phone: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -424,7 +389,7 @@ export default function Settings() {
                           required
                           value={companyForm.email}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, email: e.target.value })
+                            setCompanyForm({ ...companyForm, email: e.target.value.toLowerCase() })
                           }
                         />
                       </div>
@@ -453,7 +418,7 @@ export default function Settings() {
                           required
                           value={companyForm.bank_name}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, bank_name: e.target.value })
+                            setCompanyForm({ ...companyForm, bank_name: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -463,9 +428,10 @@ export default function Settings() {
                           type="text"
                           className="finput"
                           required
+                          maxLength={100}
                           value={companyForm.account_number}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, account_number: e.target.value })
+                            setCompanyForm({ ...companyForm, account_number: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -475,9 +441,10 @@ export default function Settings() {
                           type="text"
                           className="finput"
                           required
+                          maxLength={11}
                           value={companyForm.ifsc_code}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, ifsc_code: e.target.value })
+                            setCompanyForm({ ...companyForm, ifsc_code: e.target.value.toUpperCase() })
                           }
                         />
                       </div>
@@ -520,7 +487,7 @@ export default function Settings() {
                             Company Name
                           </span>
                           <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--t1)' }}>
-                            {company.company_name}
+                            {company.company_name || '—'}
                           </div>
                         </div>
 
@@ -529,7 +496,7 @@ export default function Settings() {
                             GSTIN
                           </span>
                           <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--t1)' }}>
-                            {company.gstin}
+                            {company.gstin || '—'}
                           </div>
                         </div>
                         <div>
@@ -537,7 +504,7 @@ export default function Settings() {
                             PAN Number
                           </span>
                           <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--t1)' }}>
-                            {company.pan_number}
+                            {company.pan_number || '—'}
                           </div>
                         </div>
 
@@ -546,7 +513,13 @@ export default function Settings() {
                             Address
                           </span>
                           <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                            {company.address}, {company.city}, {company.state} - {company.pincode}
+                            {(() => {
+                              const parts = [company.address, company.city, company.state].filter(Boolean)
+                              const mainAddress = parts.join(', ')
+                              return mainAddress
+                                ? (mainAddress + (company.pincode ? ` - ${company.pincode}` : ''))
+                                : (company.pincode || '—')
+                            })()}
                           </div>
                         </div>
 
@@ -555,7 +528,7 @@ export default function Settings() {
                             Phone
                           </span>
                           <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                            {company.phone}
+                            {company.phone || '—'}
                           </div>
                         </div>
                         <div>
@@ -563,16 +536,7 @@ export default function Settings() {
                             Email Address
                           </span>
                           <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                            {company.email}
-                          </div>
-                        </div>
-
-                        <div>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            Invoice Number Prefix
-                          </span>
-                          <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                            <span className="badge badge-blue">{company.invoice_prefix}</span>
+                            {company.email || '—'}
                           </div>
                         </div>
 
@@ -602,7 +566,7 @@ export default function Settings() {
                             Bank Name
                           </span>
                           <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                            {company.bank_name}
+                            {company.bank_name || '—'}
                           </div>
                         </div>
                         <div>
@@ -617,7 +581,7 @@ export default function Settings() {
                               fontFamily: 'monospace'
                             }}
                           >
-                            {company.account_number}
+                            {company.account_number || '—'}
                           </div>
                         </div>
                         <div>
@@ -632,7 +596,7 @@ export default function Settings() {
                               fontFamily: 'monospace'
                             }}
                           >
-                            {company.ifsc_code}
+                            {company.ifsc_code || '—'}
                           </div>
                         </div>
                       </div>
@@ -657,151 +621,108 @@ export default function Settings() {
                     User Account Settings
                   </span>
                 </div>
-                {!isEditingUser && (
-                  <button
-                    className="btn btn-outline btn-sm"
-                    onClick={() => setIsEditingUser(true)}
-                  >
-                    <Edit2 size={13} /> Edit Profile
-                  </button>
-                )}
               </div>
 
               <div style={{ padding: '24px' }}>
-                {isEditingUser ? (
-                  <form onSubmit={handleUserSave}>
-                    <div className="fgrp">
-                      <label className="flabel">Full Name</label>
-                      <input
-                        type="text"
-                        className="finput"
-                        required
-                        value={userForm.full_name}
-                        onChange={(e) => setUserForm({ ...userForm, full_name: e.target.value })}
-                      />
-                    </div>
-                    <div className="fgrp">
-                      <label className="flabel">Username (Email)</label>
-                      <input
-                        type="text"
-                        className="finput"
-                        required
-                        value={userForm.username}
-                        onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
-                      />
-                    </div>
-
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: '20px'
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
+                      User ID
+                    </span>
                     <div
                       style={{
-                        display: 'flex',
-                        justifyContent: 'flex-end',
-                        gap: '10px',
-                        marginTop: '20px'
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        color: 'var(--t1)',
+                        fontFamily: 'monospace'
                       }}
                     >
-                      <button
-                        type="button"
-                        className="btn btn-outline"
-                        onClick={() => {
-                          setIsEditingUser(false)
-                          setUserForm({
-                            full_name: user?.full_name || '',
-                            username: user?.username || ''
-                          })
-                        }}
-                      >
-                        <X size={15} /> Cancel
-                      </button>
-                      <button type="submit" className="btn btn-primary">
-                        <Save size={15} /> Save Details
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(2, 1fr)',
-                      gap: '20px'
-                    }}
-                  >
-                    <div>
-                      <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                        User ID
-                      </span>
-                      <div
-                        style={{
-                          fontSize: '14px',
-                          fontWeight: 600,
-                          color: 'var(--t1)',
-                          fontFamily: 'monospace'
-                        }}
-                      >
-                        #{user?.user_id || 'N/A'}
-                      </div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                        System Permission Role
-                      </span>
-                      <div>
-                        <span className="badge badge-green" style={{ textTransform: 'uppercase' }}>
-                          {user?.role || 'Staff'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                        Account Full Name
-                      </span>
-                      <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--t1)' }}>
-                        {user?.full_name || 'N/A'}
-                      </div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                        Username Credentials
-                      </span>
-                      <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                        {user?.username || 'N/A'}
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        gridColumn: 'span 2',
-                        background: 'var(--bg)',
-                        padding: '16px',
-                        borderRadius: 'var(--r-lg)',
-                        border: '1px dashed var(--border)',
-                        marginTop: '10px'
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: '12px',
-                          fontWeight: 700,
-                          color: 'var(--t2)',
-                          marginBottom: '4px'
-                        }}
-                      >
-                        Admin Control Restriction Notice
-                      </div>
-                      <div style={{ fontSize: '11.5px', color: 'var(--t3)', lineHeight: 1.5 }}>
-                        Modifications to authorization roles, status parameters, or company bindings
-                        must be approved and applied by the Chief System Administrator to preserve audit records.
-                      </div>
+                      #{user?.user_id || 'N/A'}
                     </div>
                   </div>
-                )}
+                  <div>
+                    <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
+                      System Permission Role
+                    </span>
+                    <div>
+                      <span className="badge badge-green" style={{ textTransform: 'uppercase' }}>
+                        {user?.role || '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
+                      Account Full Name
+                    </span>
+                    <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--t1)' }}>
+                      {user?.full_name || '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
+                      Username Credentials
+                    </span>
+                    <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
+                      {user?.username || '—'}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      gridColumn: 'span 2',
+                      background: 'var(--bg)',
+                      padding: '16px',
+                      borderRadius: 'var(--r-lg)',
+                      border: '1px dashed var(--border)',
+                      marginTop: '10px'
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        color: 'var(--t2)',
+                        marginBottom: '4px'
+                      }}
+                    >
+                      Admin Control Restriction Notice
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--t3)', lineHeight: 1.5 }}>
+                      Modifications to authorization roles, status parameters, or company bindings
+                      must be approved and applied by the Chief System Administrator to preserve audit records.
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
           {/* 3) CHANGE PASSWORD */}
           {activeTab === 'password' && (
-            <div>
+            <div style={{ position: 'relative' }}>
+              {changePasswordMutation.isPending && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    background: 'rgba(255,255,255,0.7)',
+                    zIndex: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <div className="spinner" />
+                </div>
+              )}
+
               <div className="card-hdr" style={{ background: '#f8fafc' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <KeyRound size={18} color="var(--primary)" />
@@ -831,7 +752,7 @@ export default function Settings() {
                       type="password"
                       className="finput"
                       required
-                      placeholder="At least 6 characters"
+                      placeholder="At least 8 characters"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                     />

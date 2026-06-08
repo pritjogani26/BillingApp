@@ -16,28 +16,38 @@ client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config
 })
 
+let isRedirecting = false
+
 // Auto-logout on 401 & inject success status
 client.interceptors.response.use(
   (res) => {
+    isRedirecting = false
     if (
       res.data &&
       typeof res.data === 'object' &&
       !(res.data instanceof Blob) &&
       !(res.data instanceof ArrayBuffer)
     ) {
-      res.data.success = true
+      if (!('success' in res.data)) {
+        res.data.success = true
+      }
     }
     return res
   },
   (err: AxiosError<any>) => {
     if (err.response?.data && typeof err.response.data === 'object') {
-      err.response.data.success = false
+      if (!('success' in err.response.data)) {
+        err.response.data.success = false
+      }
     }
 
     if (err.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      window.location.hash = '/login'
+      if (!isRedirecting) {
+        isRedirecting = true
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        window.location.hash = '/login'
+      }
     }
     return Promise.reject(err)
   }

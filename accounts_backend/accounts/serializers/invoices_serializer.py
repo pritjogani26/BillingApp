@@ -7,11 +7,11 @@ class InvoiceItemSerializer(serializers.Serializer):
     invoice_id      = serializers.IntegerField(required=False)
     company_id      = serializers.IntegerField(required=False)
     product_id      = serializers.IntegerField(required=False, allow_null=True)
-    product_name    = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    product_name    = serializers.CharField(required=True)
     hsn_code        = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     description     = serializers.CharField(required=False, allow_null=True, allow_blank=True)
-    quantity        = serializers.DecimalField(max_digits=12, decimal_places=2, default=1.00)
-    unit_price      = serializers.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    quantity   = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0.01)
+    unit_price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0.00)
     gst_percentage  = serializers.DecimalField(max_digits=5,  decimal_places=2, required=False, default=0.00)
     taxable_amount  = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     cgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
@@ -31,15 +31,15 @@ class InvoiceSerializer(serializers.Serializer):
     invoice_date    = serializers.DateField(required=True)
     financial_year  = serializers.CharField(max_length=10,  required=False)
     due_date        = serializers.DateField(required=False,  allow_null=True)
-    subtotal        = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    subtotal        = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
     cgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     sgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     igst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     discount_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0.00)
     round_off       = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
-    grand_total     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    grand_total     = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
     due_amount      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
-    payment_status  = serializers.CharField(max_length=20,  required=False)
+    payment_status = serializers.ChoiceField(choices=['PENDING', 'PAID', 'PARTIAL'], required=False, default='PENDING')
     status          = serializers.CharField(max_length=1,   required=False)
     notes           = serializers.CharField(required=False,  allow_null=True, allow_blank=True)
     created_at      = serializers.DateTimeField(required=False, allow_null=True)
@@ -58,6 +58,19 @@ class InvoiceSerializer(serializers.Serializer):
     customer_email   = serializers.CharField(required=False, allow_null=True)
 
     items = InvoiceItemSerializer(many=True, required=False)
+    
+    def validate(self, data):
+        subtotal = data.get('subtotal', 0) or 0
+        discount = data.get('discount_amount', 0) or 0
+        if discount > subtotal:
+            raise serializers.ValidationError(
+                {"discount_amount": "Discount cannot exceed subtotal."}
+            )
+        if data.get('due_date') and data['due_date'] < data['invoice_date']:
+            raise serializers.ValidationError(
+                {"due_date": "Due date cannot be before invoice date."}
+            )
+        return data
 
 
 class DashboardStatsSerializer(serializers.Serializer):

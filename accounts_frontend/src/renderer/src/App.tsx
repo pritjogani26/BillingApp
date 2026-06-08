@@ -1,6 +1,4 @@
-// src/renderer/src/App.tsx
-
-import React from 'react'
+import React, { useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -16,27 +14,28 @@ import Ledger from './pages/Ledger'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
-      refetchOnWindowFocus: false
-    }
-  }
-})
-
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, isValidated } = useAuth()
+  if (!isValidated) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="spinner" style={{ width: 40, height: 40 }} />
+      </div>
+    )
+  }
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
 }
 
 function AppRoutes() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, isValidated } = useAuth()
   return (
     <>
       <TitleBar />
       <Routes>
-        <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
+        <Route
+          path="/login"
+          element={isAuthenticated && isValidated ? <Navigate to="/" replace /> : <Login />}
+        />
         <Route
           path="/"
           element={
@@ -54,13 +53,34 @@ function AppRoutes() {
           <Route path="reports" element={<Reports />} />
           <Route path="settings" element={<Settings />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route
+          path="*"
+          element={
+            isAuthenticated && isValidated ? (
+              <Navigate to="/" replace />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
       </Routes>
     </>
   )
 }
 
 export default function App() {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: false,
+            refetchOnWindowFocus: false
+          }
+        }
+      })
+  )
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
