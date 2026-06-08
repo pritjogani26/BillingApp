@@ -33,14 +33,19 @@ interface CustomerInfo {
   state?: string
 }
 
-const inr = (n: number | string | null | undefined) =>
-  n == null
-    ? '₹0.00'
-    : '₹' +
-      Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const inr = (n: number | string | null | undefined) => {
+  if (n == null) return '₹0.00'
+  const val = Number(n)
+  if (isNaN(val)) return '₹0.00'
+  return '₹' + val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
-const fmt = (d: string) =>
-  new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+const fmt = (d: string) => {
+  if (!d) return ''
+  const parsed = new Date(d)
+  if (isNaN(parsed.getTime())) return d
+  return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 type Tab = 'outstanding' | 'ledger'
 
@@ -53,6 +58,12 @@ export default function Ledger() {
   const [toDate, setToDate] = useState('')
   const [submittedFromDate, setSubmittedFromDate] = useState('')
   const [submittedToDate, setSubmittedToDate] = useState('')
+  const [dateError, setDateError] = useState('')
+
+  const changeTab = (t: Tab) => {
+    setTab(t)
+    setDateError('')
+  }
 
   // Debounce search changes
   useEffect(() => {
@@ -75,7 +86,7 @@ export default function Ledger() {
   const { data: customersData, isLoading: custLoading } = useQuery({
     queryKey: ['ledgerCustomers', debouncedSearch],
     queryFn: async () => {
-      const res = await client.get(`/customers/?search=${debouncedSearch}`)
+      const res = await client.get(`/customers/?search=${encodeURIComponent(debouncedSearch)}`)
       return (res.data.data.customers || []) as CustomerInfo[]
     },
     enabled: tab === 'ledger'
@@ -111,9 +122,15 @@ export default function Ledger() {
     setToDate('')
     setSubmittedFromDate('')
     setSubmittedToDate('')
+    setDateError('')
   }
 
   const handleFilter = () => {
+    if (fromDate && toDate && new Date(fromDate) > new Date(toDate)) {
+      setDateError('From Date cannot be after To Date.')
+      return
+    }
+    setDateError('')
     setSubmittedFromDate(fromDate)
     setSubmittedToDate(toDate)
   }
@@ -131,12 +148,28 @@ export default function Ledger() {
     setToDate('')
     setSubmittedFromDate('')
     setSubmittedToDate('')
+    setDateError('')
   }
 
-  const totalOutstanding = outstanding.reduce((s, r) => s + Number(r.outstanding), 0)
+  const totalOutstanding = outstanding.reduce((s, r) => {
+    const val = Number(r.outstanding)
+    return s + (isNaN(val) ? 0 : val)
+  }, 0)
+
   const filteredCusts = customers.filter(
     (c) => !search || c.customer_name.toLowerCase().includes(search.toLowerCase())
   )
+
+  const totalBilled = entries.reduce((s, e) => {
+    const val = Number(e.debit_amount)
+    return s + (isNaN(val) ? 0 : val)
+  }, 0)
+
+  const totalReceived = entries.reduce((s, e) => {
+    const val = Number(e.credit_amount)
+    return s + (isNaN(val) ? 0 : val)
+  }, 0)
+
   const closingBalance = entries.length > 0
     ? Number(entries[entries.length - 1].running_balance)
     : openingBalance
@@ -165,7 +198,7 @@ export default function Ledger() {
         {(['outstanding', 'ledger'] as Tab[]).map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => changeTab(t)}
             className="btn btn-ghost"
             style={{
               borderRadius: '6px 6px 0 0',
@@ -207,7 +240,7 @@ export default function Ledger() {
             <div className="stat-card">
               <div className="stat-label">Pending Invoices</div>
               <div className="stat-value" style={{ fontSize: 22 }}>
-                {outstanding.reduce((s, r) => s + r.pending_invoices, 0)}
+                {outstanding.reduce((s, r) => s + (Number(r.pending_invoices) || 0), 0)}
               </div>
               <div className="stat-sub">Awaiting settlement</div>
             </div>
@@ -249,7 +282,7 @@ export default function Ledger() {
                     </tr>
                   </thead>
                   <tbody>
-                    {outstanding
+                    {[...outstanding]
                       .sort((a, b) => Number(b.outstanding) - Number(a.outstanding))
                       .map((r) => (
                         <tr key={r.customer_id}>
@@ -333,6 +366,14 @@ export default function Ledger() {
                   <div
                     key={c.customer_id}
                     onClick={() => selectCustomer(c)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        selectCustomer(c)
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                     style={{
                       padding: '10px 16px',
                       cursor: 'pointer',
@@ -415,6 +456,13 @@ export default function Ledger() {
                     </button>
                   </div>
                 </div>
+
+                {dateError && (
+                  <div className="login-err" style={{ margin: '16px 20px 0' }}>
+                    <AlertCircle size={15} />
+                    {dateError}
+                  </div>
+                )}
 
                 {entriesError && (
                   <div className="login-err" style={{ margin: '16px 20px 0' }}>
@@ -551,13 +599,13 @@ export default function Ledger() {
                         <div>
                           <span className="t2">Total Billed: </span>
                           <span style={{ fontWeight: 700, color: 'var(--danger)' }}>
-                            {inr(entries.reduce((s, e) => s + Number(e.debit_amount), 0))}
+                            {inr(totalBilled)}
                           </span>
                         </div>
                         <div>
                           <span className="t2">Total Received: </span>
                           <span style={{ fontWeight: 700, color: 'var(--success)' }}>
-                            {inr(entries.reduce((s, e) => s + Number(e.credit_amount), 0))}
+                            {inr(totalReceived)}
                           </span>
                         </div>
                         <div>

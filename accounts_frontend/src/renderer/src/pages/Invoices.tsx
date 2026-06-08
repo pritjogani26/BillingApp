@@ -70,8 +70,12 @@ const inr = (n: number | string | null | undefined) =>
     : '₹' +
     Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-const fmt = (d: string) =>
-  new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+const fmt = (d: string) => {
+  if (!d) return ''
+  const parsed = new Date(d)
+  if (isNaN(parsed.getTime())) return d
+  return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 const statusBadge = (s: string) => {
   if (s === 'PAID') return <span className="badge badge-green">Paid</span>
@@ -86,6 +90,14 @@ const emptyItem = (): InvoiceItem => ({
   unit_price: '0',
   gst_percentage: '18',
   hsn_code: '94054090'
+})
+
+const getInitialCform = () => ({
+  customer_id: '',
+  invoice_type: 'TAX',
+  invoice_date: new Date().toISOString().slice(0, 10),
+  discount_amount: '0',
+  notes: ''
 })
 
 const MONTHS = [
@@ -169,13 +181,7 @@ export default function Invoices() {
   const [payError, setPayError] = useState('')
 
   // Create form
-  const [cform, setCform] = useState({
-    customer_id: '',
-    invoice_type: 'TAX',
-    invoice_date: new Date().toISOString().slice(0, 10),
-    discount_amount: '0',
-    notes: ''
-  })
+  const [cform, setCform] = useState(getInitialCform())
   const [items, setItems] = useState<InvoiceItem[]>([emptyItem()])
   const [cformError, setCformError] = useState('')
 
@@ -242,7 +248,10 @@ export default function Invoices() {
     },
     onSuccess: () => {
       setShowCreate(false)
+      setCform(getInitialCform())
+      setItems([emptyItem()])
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
     onError: (err: any) => {
       setCformError(err.response?.data?.message || 'Error creating invoice.')
@@ -259,6 +268,7 @@ export default function Invoices() {
       setShowDetail(false)
       setActiveInvoiceId(null)
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
     onError: (err: any) => {
       setPayError(err.response?.data?.message || 'Error recording payment.')
@@ -271,13 +281,7 @@ export default function Invoices() {
   /* Load dropdowns when create modal opens */
   const openCreate = () => {
     setItems([emptyItem()])
-    setCform({
-      customer_id: '',
-      invoice_type: 'TAX',
-      invoice_date: new Date().toISOString().slice(0, 10),
-      discount_amount: '0',
-      notes: ''
-    })
+    setCform(getInitialCform())
     setCformError('')
     setShowCreate(true)
   }
@@ -305,7 +309,7 @@ export default function Invoices() {
             product_name: prod.product_name,
             unit_price: String(prod.unit_price ?? 0),
             gst_percentage: String(prod.gst_percentage ?? 18),
-            hsn_code: prod.hsn_code || '94054090'
+            hsn_code: prod.hsn_code || ''
           }
         } else {
           next[idx] = {
@@ -324,9 +328,9 @@ export default function Invoices() {
   const removeItem = (idx: number) => setItems((p) => p.filter((_, i) => i !== idx))
 
   const calcLine = (it: InvoiceItem) => {
-    const qty = Number(it.quantity) || 0,
-      up = Number(it.unit_price) || 0,
-      gst = cform.invoice_type === 'TAX' ? 18 : (Number(it.gst_percentage) || 0)
+    const qty = Math.max(0, Number(it.quantity) || 0),
+      up = Math.max(0, Number(it.unit_price) || 0),
+      gst = (it.gst_percentage === '' || it.gst_percentage === undefined || it.gst_percentage === null) ? 18 : (Number(it.gst_percentage) || 0)
     const taxable = qty * up
     const half = gst / 2
     const cgst = +((taxable * half) / 100).toFixed(2)
@@ -347,13 +351,32 @@ export default function Invoices() {
     { subtotal: 0, cgst: 0, sgst: 0, total: 0 }
   )
   const disc = Number(cform.discount_amount) || 0
-  const grandTotal = totals.total - disc
+  const grandTotal = Math.max(0, totals.total - disc)
+
+  const gstRates = Array.from(new Set(items.map(it => {
+    return (it.gst_percentage === '' || it.gst_percentage === undefined || it.gst_percentage === null) ? 18 : (Number(it.gst_percentage) || 0)
+  })))
+  const cgstLabel = gstRates.length === 1 ? `CGST (${gstRates[0] / 2}%)` : 'CGST'
+  const sgstLabel = gstRates.length === 1 ? `SGST (${gstRates[0] / 2}%)` : 'SGST'
+
+  const getDetailGstRates = () => {
+    if (!detailInv || !detailInv.items) return []
+    return Array.from(new Set(detailInv.items.map(it => Number(it.gst_percentage) || 0)))
+  }
+  const detailGstRates = getDetailGstRates()
+  const detailCgstLabel = detailGstRates.length === 1 ? `CGST (${detailGstRates[0] / 2}%)` : 'CGST'
+  const detailSgstLabel = detailGstRates.length === 1 ? `SGST (${detailGstRates[0] / 2}%)` : 'SGST'
+  const detailIgstLabel = detailGstRates.length === 1 ? `IGST (${detailGstRates[0]}%)` : 'IGST'
 
   /* Submit create */
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
     if (!cform.customer_id) {
       setCformError('Please select a customer.')
+      return
+    }
+    if (items.length === 0) {
+      setCformError('Please add at least one line item.')
       return
     }
     if (items.some((it) => !it.product_name?.trim())) {
@@ -368,7 +391,7 @@ export default function Invoices() {
         product_name: it.product_name,
         quantity: it.quantity,
         unit_price: it.unit_price,
-        gst_percentage: cform.invoice_type === 'TAX' ? '18' : it.gst_percentage,
+        gst_percentage: (it.gst_percentage === '' || it.gst_percentage === undefined || it.gst_percentage === null) ? '18' : it.gst_percentage,
         hsn_code: it.hsn_code || null
       }))
     }
@@ -377,7 +400,7 @@ export default function Invoices() {
 
   /* Open payment dialog */
   const openPay = () => {
-    if (!detailInv) return
+    if (!detailInv || detailLoading) return
     setPayForm({
       amount: String(Number(detailInv.due_amount).toFixed(2)),
       payment_date: new Date().toISOString().slice(0, 10),
@@ -397,11 +420,13 @@ export default function Invoices() {
       setPayError('Enter a valid amount.')
       return
     }
+    if (Number(payForm.amount) > Number(detailInv.due_amount)) {
+      setPayError(`Amount cannot exceed outstanding due of ${inr(detailInv.due_amount)}.`)
+      return
+    }
     setPayError('')
     createPaymentMutation.mutate({
       invoice_id: detailInv.invoice_id,
-      company_id: detailInv.company_id,
-      customer_id: detailInv.customer_id,
       ...payForm
     })
   }
@@ -658,10 +683,11 @@ export default function Invoices() {
                     </select>
                   </div>
                   <div className="fgrp">
-                    <label className="flabel">Invoice Date</label>
+                    <label className="flabel">Invoice Date *</label>
                     <input
                       className="finput"
                       type="date"
+                      required
                       value={cform.invoice_date}
                       onChange={(e) => setCform({ ...cform, invoice_date: e.target.value })}
                     />
@@ -809,9 +835,7 @@ export default function Invoices() {
                                     {products
                                       .filter((p) => String(p.customer_id) === String(cform.customer_id))
                                       .map((p) => (
-                                        <option key={p.product_id} value={p.product_name}>
-                                          {p.product_name}
-                                        </option>
+                                        <option key={p.product_id} value={p.product_name} />
                                       ))}
                                   </datalist>
                                 )}
@@ -831,6 +855,7 @@ export default function Invoices() {
                                   className="finput"
                                   type="number"
                                   step="0.01"
+                                  min="0.01"
                                   style={{ padding: '5px 8px', fontSize: 13, textAlign: 'right' }}
                                   value={it.quantity}
                                   onChange={(e) => updateItem(idx, 'quantity', e.target.value)}
@@ -841,6 +866,7 @@ export default function Invoices() {
                                   className="finput"
                                   type="number"
                                   step="0.01"
+                                  min="0"
                                   style={{ padding: '5px 8px', fontSize: 13, textAlign: 'right' }}
                                   value={it.unit_price}
                                   onChange={(e) => updateItem(idx, 'unit_price', e.target.value)}
@@ -850,8 +876,7 @@ export default function Invoices() {
                                 <select
                                   className="finput"
                                   style={{ padding: '5px 8px', fontSize: 13, textAlign: 'right' }}
-                                  value={cform.invoice_type === 'TAX' ? '18' : it.gst_percentage}
-                                  disabled={cform.invoice_type === 'TAX'}
+                                  value={it.gst_percentage || '18'}
                                   onChange={(e) => updateItem(idx, 'gst_percentage', e.target.value)}
                                 >
                                   <option value="0">0%</option>
@@ -899,8 +924,8 @@ export default function Invoices() {
 
                 {/* Totals row */}
                 <div style={{ display: 'flex', gap: 16 }}>
-                  <div style={{ flex: 1 }}>
-                    <div className="fgrp">
+                  <div style={{ flex: 1, display: 'flex', gap: 12 }}>
+                    <div className="fgrp" style={{ flex: 2 }}>
                       <label className="flabel">Notes</label>
                       <textarea
                         className="finput"
@@ -909,6 +934,19 @@ export default function Invoices() {
                         onChange={(e) => setCform({ ...cform, notes: e.target.value })}
                         placeholder="Optional delivery or payment notes..."
                         style={{ resize: 'none', fontFamily: 'var(--font)' }}
+                      />
+                    </div>
+                    <div className="fgrp" style={{ flex: 1 }}>
+                      <label className="flabel">Discount Amount (₹)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="finput"
+                        min="0"
+                        max={totals.total}
+                        value={cform.discount_amount}
+                        onChange={(e) => setCform({ ...cform, discount_amount: e.target.value })}
+                        placeholder="0.00"
                       />
                     </div>
                   </div>
@@ -929,14 +967,20 @@ export default function Invoices() {
                       {cform.invoice_type === 'TAX' && (
                         <>
                           <div className="row jc-sb" style={{ marginBottom: 6 }}>
-                            <span className="t2">CGST</span>
+                            <span className="t2">{cgstLabel}</span>
                             <span className="fw6">{inr(totals.cgst)}</span>
                           </div>
                           <div className="row jc-sb" style={{ marginBottom: 6 }}>
-                            <span className="t2">SGST</span>
+                            <span className="t2">{sgstLabel}</span>
                             <span className="fw6">{inr(totals.sgst)}</span>
                           </div>
                         </>
+                      )}
+                      {disc > 0 && (
+                        <div className="row jc-sb" style={{ marginBottom: 6, color: 'var(--success)' }}>
+                          <span className="t2">Discount</span>
+                          <span className="fw6">-{inr(disc)}</span>
+                        </div>
                       )}
                       <div
                         style={{
@@ -985,7 +1029,11 @@ export default function Invoices() {
               </div>
               <div className="row gap-2">
                 {detailInv.payment_status !== 'PAID' && (
-                  <button className="btn btn-primary btn-sm row gap-1" onClick={openPay}>
+                  <button
+                    className="btn btn-primary btn-sm row gap-1"
+                    onClick={openPay}
+                    disabled={detailLoading}
+                  >
                     <CreditCard size={13} /> Record Payment
                   </button>
                 )}
@@ -1285,9 +1333,9 @@ export default function Invoices() {
                     >
                       {[
                         ['Subtotal', detailInv.subtotal],
-                        ['CGST', detailInv.cgst_amount],
-                        ['SGST', detailInv.sgst_amount],
-                        ['IGST', detailInv.igst_amount]
+                        [detailCgstLabel, detailInv.cgst_amount],
+                        [detailSgstLabel, detailInv.sgst_amount],
+                        [detailIgstLabel, detailInv.igst_amount]
                       ].map(([label, val]) =>
                         Number(val) > 0 ? (
                           <div
@@ -1410,6 +1458,8 @@ export default function Invoices() {
                       className="finput"
                       type="number"
                       step="0.01"
+                      min="0.01"
+                      max={Number(detailInv.due_amount)}
                       value={payForm.amount}
                       onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
                     />
@@ -1433,7 +1483,6 @@ export default function Invoices() {
                       onChange={(e) => setPayForm({ ...payForm, payment_method: e.target.value })}
                     >
                       <option value="NEFT">NEFT</option>
-                      <option value="BANK">Bank Transfer</option>
                       <option value="RTGS">RTGS</option>
                       <option value="CHEQUE">Cheque</option>
                       <option value="UPI">UPI</option>

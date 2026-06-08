@@ -26,19 +26,23 @@ interface Payment {
   notes: string
 }
 
-const inr = (n: number | string | null | undefined) =>
-  n == null
-    ? '₹0.00'
-    : '₹' +
-      Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const inr = (n: number | string | null | undefined) => {
+  if (n == null) return '₹0.00'
+  const val = Number(n)
+  if (isNaN(val)) return '₹0.00'
+  return '₹' + val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
-const fmt = (d: string) =>
-  new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+const fmt = (d: string) => {
+  if (!d) return ''
+  const parsed = new Date(d)
+  if (isNaN(parsed.getTime())) return d
+  return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 const MethodIcon = ({ method }: { method: string }) => {
   const map: Record<string, { icon: React.ReactNode; cls: string; label: string }> = {
     CASH:   { icon: <Wallet size={12} />,    cls: 'badge-green',  label: 'Cash'   },
-    BANK:   { icon: <Building2 size={12} />, cls: 'badge-blue',   label: 'Bank'   },
     NEFT:   { icon: <Building2 size={12} />, cls: 'badge-blue',   label: 'NEFT'   },
     RTGS:   { icon: <Building2 size={12} />, cls: 'badge-blue',   label: 'RTGS'   },
     UPI:    { icon: <Smartphone size={12} />, cls: 'badge-yellow', label: 'UPI'   },
@@ -57,14 +61,73 @@ const MethodIcon = ({ method }: { method: string }) => {
   )
 }
 
+const getCurrentFinancialYear = () => {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = today.getMonth() + 1
+  const fyStart = month >= 4 ? year : year - 1
+  return `${fyStart}-${String(fyStart + 1).slice(-2)}`
+}
+
+const getFinancialYearsList = () => {
+  const currentFY = getCurrentFinancialYear()
+  const startYear = parseInt(currentFY.split('-')[0])
+  return [
+    `${startYear}-${String(startYear + 1).slice(-2)}`,
+    `${startYear - 1}-${String(startYear).slice(-2)}`,
+    `${startYear - 2}-${String(startYear - 1).slice(-2)}`
+  ]
+}
+
+const getFYDateRange = (fy: string, month: number) => {
+  const startYear = parseInt(fy.split('-')[0])
+  if (month === 0) {
+    const endYear = startYear + 1
+    return {
+      fromDate: `${startYear}-04-01`,
+      toDate: `${endYear}-03-31`
+    }
+  } else {
+    const year = month >= 4 ? startYear : startYear + 1
+    const lastDay = new Date(year, month, 0).getDate()
+    const monthStr = String(month).padStart(2, '0')
+    return {
+      fromDate: `${year}-${monthStr}-01`,
+      toDate: `${year}-${monthStr}-${String(lastDay).padStart(2, '0')}`
+    }
+  }
+}
+
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December'
+]
+
 export default function Payments() {
   const [search, setSearch] = useState('')
   const [method, setMethod] = useState('')
+  const [fyFilter, setFyFilter] = useState(getCurrentFinancialYear())
+  const [monthFilter, setMonthFilter] = useState<number>(new Date().getMonth() + 1)
+
+  const { fromDate, toDate } = getFYDateRange(fyFilter, monthFilter)
 
   const { data: paymentsData, isLoading: loadingPayments, error: paymentsError } = useQuery({
-    queryKey: ['payments'],
+    queryKey: ['payments', fromDate, toDate],
     queryFn: async () => {
-      const res = await client.get('/payments/')
+      const params = new URLSearchParams()
+      if (fromDate) params.set('from_date', fromDate)
+      if (toDate) params.set('to_date', toDate)
+      const res = await client.get(`/payments/?${params}`)
       return (res.data.data.payments || []) as Payment[]
     }
   })
@@ -77,13 +140,24 @@ export default function Payments() {
     const q = search.toLowerCase()
     const matchSearch =
       !search ||
-      p.invoice_number.toLowerCase().includes(q) ||
-      p.customer_name.toLowerCase().includes(q)
+      (p.invoice_number ?? '').toLowerCase().includes(q) ||
+      (p.customer_name ?? '').toLowerCase().includes(q)
     const matchMethod = !method || p.payment_method === method
     return matchSearch && matchMethod
   })
 
-  const totalReceived = filtered.reduce((sum, p) => sum + Number(p.amount), 0)
+  const totalReceived = filtered.reduce((sum, p) => {
+    const n = Number(p.amount)
+    return sum + (isNaN(n) ? 0 : n)
+  }, 0)
+
+  const cashNeftRtgsCount = filtered.filter((p) =>
+    ['CASH', 'NEFT', 'RTGS'].includes(p.payment_method)
+  ).length
+
+  const digitalCount = filtered.filter((p) =>
+    ['UPI', 'CHEQUE', 'CARD'].includes(p.payment_method)
+  ).length
 
   return (
     <>
@@ -105,13 +179,13 @@ export default function Payments() {
           { label: 'Total Receipts', value: filtered.length, sub: 'filtered' },
           { label: 'Total Received', value: inr(totalReceived), sub: 'filtered sum' },
           {
-            label: 'Cash / Bank / NEFT / RTGS',
-            value: filtered.filter((p) => ['CASH', 'BANK', 'NEFT', 'RTGS'].includes(p.payment_method)).length,
+            label: 'Cash / NEFT / RTGS',
+            value: cashNeftRtgsCount,
             sub: 'transactions'
           },
           {
             label: 'UPI / Cheque / Card',
-            value: filtered.filter((p) => ['UPI', 'CHEQUE', 'CARD'].includes(p.payment_method)).length,
+            value: digitalCount,
             sub: 'transactions'
           }
         ].map((s, i) => (
@@ -140,13 +214,37 @@ export default function Payments() {
           <div className="row gap-2">
             <select
               className="finput"
+              style={{ width: 160, padding: '7px 10px' }}
+              value={fyFilter}
+              onChange={(e) => setFyFilter(e.target.value)}
+            >
+              {getFinancialYearsList().map((fy) => (
+                <option key={fy} value={fy}>
+                  FY - {fy}
+                </option>
+              ))}
+            </select>
+            <select
+              className="finput"
+              style={{ width: 140, padding: '7px 10px' }}
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(Number(e.target.value))}
+            >
+              <option value="0">All Months</option>
+              {MONTHS.map((m, i) => (
+                <option key={i} value={i + 1}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <select
+              className="finput"
               style={{ width: 150, padding: '7px 10px' }}
               value={method}
               onChange={(e) => setMethod(e.target.value)}
             >
               <option value="">All Methods</option>
               <option value="CASH">Cash</option>
-              <option value="BANK">Bank Transfer</option>
               <option value="NEFT">NEFT</option>
               <option value="RTGS">RTGS</option>
               <option value="UPI">UPI</option>

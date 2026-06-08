@@ -54,6 +54,8 @@ class PaymentListView(generics.GenericAPIView):
         company_id  = request.user.company_id
         invoice_id  = request.query_params.get('invoice_id')
         customer_id = request.query_params.get('customer_id')
+        from_date   = request.query_params.get('from_date')
+        to_date     = request.query_params.get('to_date')
 
         where  = ["p.company_id = %s"]
         params = [company_id]
@@ -62,6 +64,10 @@ class PaymentListView(generics.GenericAPIView):
             where.append("p.invoice_id = %s");  params.append(invoice_id)
         if customer_id:
             where.append("p.customer_id = %s"); params.append(customer_id)
+        if from_date:
+            where.append("p.payment_date >= %s"); params.append(from_date)
+        if to_date:
+            where.append("p.payment_date <= %s"); params.append(to_date)
 
         rows = query_all(
             f"""
