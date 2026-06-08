@@ -114,6 +114,33 @@ function amountInWords(amount: number): string {
   return result + ' Only'
 }
 
+function formatCompanyAddress(address: string | null, city: string | null, pincode: string | null): string[] {
+  const parts = (address ?? '').split(',').map(p => p.trim()).filter(Boolean);
+  const lines: string[] = [];
+
+  if (parts.length <= 2) {
+    if (parts.length > 0) lines.push(parts.join(', ') + ',');
+  } else if (parts.length === 3) {
+    lines.push(parts[0] + ', ' + parts[1] + ',');
+    lines.push(parts[2] + ',');
+  } else {
+    lines.push(parts[0] + ', ' + parts[1] + ',');
+    lines.push(parts[2] + ',');
+    lines.push(parts.slice(3).join(', ') + ',');
+  }
+
+  const cityPin = [city, pincode].filter(Boolean).join('-');
+  if (cityPin) {
+    if (lines.length > 0) {
+      const lastIdx = lines.length - 1;
+      lines[lastIdx] = lines[lastIdx] + ' ' + cityPin;
+    } else {
+      lines.push(cityPin);
+    }
+  }
+  return lines;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CSS injected into the print window — mirrors invoice_pdf.html exactly
 // ─────────────────────────────────────────────────────────────────────────────
@@ -123,8 +150,8 @@ const PRINT_CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { width: 100%; background: #fff; }
 body {
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 8.5pt;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 10.5pt;
   color: #000;
   line-height: 1.35;
   -webkit-print-color-adjust: exact;
@@ -142,54 +169,55 @@ body {
   padding: 5px 6px 3px;
   border-bottom: 1.5px solid #000;
 }
-.bill-type { font-size: 8pt; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; }
-.company-name { font-size: 17pt; font-weight: bold; letter-spacing: 1px; line-height: 1.15; margin: 1px 0; }
-.company-addr { font-size: 7.5pt; line-height: 1.4; }
+.bill-type { font-family: Arial, Helvetica, sans-serif; font-size: 12pt; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; }
+.company-name { font-family: Arial, Helvetica, sans-serif; font-size: 26pt; font-weight: bold; letter-spacing: 1px; line-height: 1.15; margin: 1px 0; }
+.company-addr { font-size: 11pt; line-height: 1.5; }
 .gstin-strip {
-  text-align: center; font-size: 8pt; font-weight: bold;
-  padding: 3px 6px; background: #e8e8e8;
+  font-family: Arial, Helvetica, sans-serif;
+  text-align: center; font-size: 10pt; font-weight: bold;
+  padding: 3px 6px;
   border-bottom: 1px solid #000; letter-spacing: 1px;
 }
 .info-row { display: flex; border-bottom: 1px solid #000; }
-.info-col { flex: 1; padding: 4px 7px; font-size: 8pt; line-height: 1.5; }
+.info-col { flex: 1; padding: 4px 7px; font-size: 10pt; line-height: 1.5; }
 .info-col + .info-col { border-left: 1px solid #000; }
-.block-title { font-weight: bold; font-size: 8.5pt; text-decoration: underline; margin-bottom: 2px; display: block; }
+.block-title { font-family: Arial, Helvetica, sans-serif; font-weight: bold; font-size: 11pt; text-decoration: underline; margin-bottom: 2px; display: block; }
 .meta-table { width: 100%; border-collapse: collapse; }
-.meta-table td { padding: 0 2px; font-size: 8pt; vertical-align: top; }
+.meta-table td { padding: 0 2px; font-size: 10pt; vertical-align: top; }
 .meta-table td:first-child { font-weight: bold; white-space: nowrap; padding-right: 4px; min-width: 90px; }
 .items-table { width: 100%; border-collapse: collapse; flex: 1; }
-.items-table th, .items-table td { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; }
+.items-table th, .items-table td { border: 1px solid #000; padding: 2px 3px; vertical-align: middle; }
 .items-table th:first-child, .items-table td:first-child { border-left: none; }
 .items-table th:last-child, .items-table td:last-child { border-right: none; }
 .items-table thead tr:first-child th { border-top: none; }
-.items-table thead th { background: #d0d0d0; font-weight: bold; text-align: center; font-size: 8pt; }
-.items-table tbody td { font-size: 8pt; height: 28px; }
+.items-table thead th { font-family: Arial, Helvetica, sans-serif; font-weight: bold; text-align: center; font-size: 7pt; }
+.items-table tbody td { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; height: 28px; border-top: none; border-bottom: none; }
 .items-table tbody tr.empty-row td { height: 28px; }
 .items-table tbody tr.filler-row td { height: auto; }
 .num { text-align: right; }
 .cen { text-align: center; }
 .totals-row { display: flex; border-top: 1.5px solid #000; border-bottom: 1px solid #000; min-height: 62px; }
-.gst-note-col { flex: 1; padding: 5px 7px; font-size: 7.5pt; border-right: 1px solid #000; display: flex; align-items: flex-end; }
+.gst-note-col { flex: 1; padding: 5px 7px; font-size: 9.5pt; border-right: 1px solid #000; display: flex; align-items: flex-end; }
 .totals-col { width: 200px; }
 .totals-col table { width: 100%; border-collapse: collapse; }
-.totals-col table td { padding: 2px 6px; font-size: 8pt; border-bottom: 1px solid #d0d0d0; }
+.totals-col table td { padding: 2px 6px; font-size: 10pt; border-bottom: 1px solid #d0d0d0; }
 .totals-col table tr:last-child td { border-bottom: none; }
 .t-label { font-weight: bold; }
-.t-value { text-align: right; font-family: 'Courier New', monospace; }
-.grand-row td { background: #d0d0d0; font-weight: bold; font-size: 9pt; border-top: 1.5px solid #000; border-bottom: none; }
-.amount-words { padding: 4px 7px; font-size: 7.5pt; font-weight: bold; border-bottom: 1px solid #000; }
+.t-value { text-align: right; font-family: Arial, Helvetica, sans-serif; }
+.grand-row td { font-weight: bold; font-size: 11pt; border-top: 1.5px solid #000; border-bottom: none; }
+.amount-words { padding: 4px 7px; font-size: 9.5pt; font-weight: bold; border-bottom: 1px solid #000; }
 .bottom-strip { display: flex; flex: 1; min-height: 80px; }
-.bottom-col { padding: 5px 7px; font-size: 7.5pt; line-height: 1.6; flex: 1; }
+.bottom-col { padding: 5px 7px; font-size: 9.5pt; line-height: 1.6; flex: 1; }
 .bottom-col + .bottom-col { border-left: 1px solid #000; }
-.col-title { font-weight: bold; font-size: 8pt; text-decoration: underline; margin-bottom: 3px; display: block; }
+.col-title { font-family: Arial, Helvetica, sans-serif; font-weight: bold; font-size: 10pt; text-decoration: underline; margin-bottom: 3px; display: block; }
 .b-label { font-weight: bold; display: inline-block; min-width: 82px; }
 .sig-col {
-  display: flex; flex-direction: column; justify-content: space-between;
-  align-items: flex-end; text-align: center;
+  display: flex; flex-direction: column; justify-content: center;
+  align-items: center; text-align: center;
   padding: 5px 10px; min-width: 160px; flex-shrink: 0;
 }
-.for-label { font-size: 7.5pt; font-weight: bold; align-self: flex-end; }
-.sig-space { width: 120px; height: 48px; border-bottom: 1.5px solid #000; margin: 6px auto 4px; display: flex; align-items: center; justify-content: center; }
+.for-label { font-size: 7.5pt; font-weight: bold; align-self: flex-start; }
+.sig-space { width: 180px; height: 70px; margin: 4px auto; display: flex; align-items: center; justify-content: center; }
 .auth-label { font-size: 7.5pt; font-weight: bold; text-align: center; width: 100%; }
 `
 
@@ -253,12 +281,14 @@ function InvoiceDocument({
         <div className="bill-type">{invoiceTypeLabel}</div>
         <div className="company-name">{(company.company_name ?? '').toUpperCase()}</div>
         <div className="company-addr">
-          {[company.address, company.city].filter(Boolean).join(', ')}
-          {company.pincode ? ` – ${company.pincode}` : ''}
-          <br />
-          Phone&nbsp;:&nbsp;{company.phone || '—'}
-          &nbsp;&nbsp;|&nbsp;&nbsp;
-          E-Mail&nbsp;:&nbsp;{company.email || '—'}
+          {formatCompanyAddress(company.address, company.city, company.pincode).map((line, index) => (
+            <div key={index}>{line}</div>
+          ))}
+          <div style={{ marginTop: 2 }}>
+            Phone&nbsp;:&nbsp;{company.phone || '—'}
+            &nbsp;&nbsp;&nbsp;&nbsp;
+            E-Mail&nbsp;:&nbsp;{company.email || '—'}
+          </div>
         </div>
       </div>
 
@@ -285,10 +315,8 @@ function InvoiceDocument({
             <tbody>
               {([
                 ['Invoice No.', <strong key="no">{invoice.invoice_number}</strong>],
-                ['Date', fmtDate(invoice.invoice_date)],
+                ['Date', <strong key="date">{fmtDate(invoice.invoice_date)}</strong>],
                 ['Order No.', ''],
-                ['L.R. No.', ''],
-                ['Cases', '0'],
                 ['Transport', ''],
                 ['Due Date', fmtDate(invoice.due_date)],
               ] as [string, React.ReactNode][]).map(([label, val]) => (
@@ -338,7 +366,7 @@ function InvoiceDocument({
                     <td className="cen">{halfPct.toFixed(2)}</td>
                   </>
               )}
-              <td className="num">{fmt(item.total_amount)}</td>
+              <td className="num">{fmt(item.taxable_amount)}</td>
             </tr>
           ))}
           {Array.from({ length: emptyRows }).map((_, i) => {
@@ -432,7 +460,7 @@ function InvoiceDocument({
 
         <div className="bottom-col">
           <span className="col-title">Terms &amp; Conditions</span>
-          <ol style={{ paddingLeft: 12, margin: 0, fontSize: '7pt', lineHeight: 1.7 }}>
+          <ol style={{ paddingLeft: 12, margin: 0, fontSize: '9pt', lineHeight: 1.7 }}>
             <li>Goods once sold will not be taken back or exchanged.</li>
             <li>Payment must be made within the due date mentioned on the invoice.</li>
             <li>Interest @ 1.5% per month will be charged on all outstanding amounts remaining unpaid after the due date.</li>
@@ -444,7 +472,7 @@ function InvoiceDocument({
           <span className="for-label">For {(company.company_name ?? '').toUpperCase()}</span>
           <div className="sig-space">
             {sigBase64 && (
-              <img src={sigBase64} style={{ maxHeight: 38, maxWidth: 120, objectFit: 'contain' }} alt="Signature" />
+              <img src={sigBase64} style={{ maxHeight: 58, maxWidth: 150, objectFit: 'contain' }} alt="Signature" />
             )}
           </div>
           <span className="auth-label">Authorised Signatory</span>
