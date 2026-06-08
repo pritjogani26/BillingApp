@@ -106,6 +106,7 @@ USE_I18N = True
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'accounts' / 'static']
+BACKUP_DIR = BASE_DIR / "backups" 
 
 MEDIA_URL  = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'

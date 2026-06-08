@@ -11,10 +11,13 @@ import {
   X,
   Shield,
   KeyRound,
-  Store
+  Store,
+  Database
 } from 'lucide-react'
 import client from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import BackupSection from './BackupSection'
+
 
 interface CompanyData {
   company_name: string
@@ -33,7 +36,7 @@ interface CompanyData {
 
 export default function Settings() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<'company' | 'user' | 'password'>('company')
+  const [activeTab, setActiveTab] = useState<'company' | 'user' | 'password' | 'backup'>('company')
 
   const queryClient = useQueryClient()
 
@@ -214,7 +217,8 @@ export default function Settings() {
             {([
               { key: 'company', icon: Store, label: 'Company Profile' },
               { key: 'user', icon: User, label: 'User Profile' },
-              { key: 'password', icon: Lock, label: 'Change Password' }
+              { key: 'password', icon: Lock, label: 'Change Password' },
+              { key: 'backup', icon: Database, label: 'Database Backup' }
             ] as const).map(({ key, icon: Icon, label }) => (
               <button
                 key={key}
@@ -239,7 +243,12 @@ export default function Settings() {
         </div>
 
         {/* Subsection Content */}
-        <div className="card">
+        {activeTab === 'backup' ? (
+          <div>
+            <BackupSection />
+          </div>
+        ) : (
+          <div className="card">
           {/* 1) COMPANY PROFILE */}
           {activeTab === 'company' && (
             <div style={{ position: 'relative' }}>
@@ -782,6 +791,7 @@ export default function Settings() {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   )

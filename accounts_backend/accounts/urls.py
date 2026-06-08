@@ -14,6 +14,7 @@ from accounts.views.reports_view   import (
     MonthlySalesView,
     GSTR1ExcelDownloadView,
 )
+from accounts.views.backup_view import ListBackupsView,CreateBackupView, DeleteBackupView, DriveStatusView, ConfigureDriveView   
 
 urlpatterns = [
 
@@ -56,5 +57,11 @@ urlpatterns = [
     path("reports/gstr1/download/",     GSTR1ExcelDownloadView.as_view(),  name="gstr1_download"),
     path("reports/hsn-summary/",        HSNSummaryView.as_view(),          name="hsn_summary"),
     path("reports/monthly-sales/",      MonthlySalesView.as_view(),        name="monthly_sales"),
-
+    
+    # ── Backups ──────────────────────────────────────────────────────────────
+    path("backups/",                    ListBackupsView.as_view(),      name="list-backups"),
+    path("backups/create/",             CreateBackupView.as_view(),     name="create-backup"),
+    path("backups/<str:filename>/",     DeleteBackupView.as_view(),     name="delete-backup"),
+    path("backups/drive/status/",       DriveStatusView.as_view(),      name="drive-status"),
+    path("backups/drive/configure/",    ConfigureDriveView.as_view(),   name="configure-drive"),
 ]
