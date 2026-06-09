@@ -5,17 +5,23 @@ import { Zap, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useAuth } from '../context/AuthContext'
 import client from '../api/client'
+import { parseApiError } from '../utils/errorHelper'
 
 export default function Login() {
   const [form, setForm] = useState({ username: '', password: '' })
   const [showPwd, setShowPwd] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<React.ReactNode>('')
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({})
   const { login } = useAuth()
   const navigate = useNavigate()
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm((f) => ({ ...f, [e.target.name]: e.target.value }))
+    const { name } = e.target
+    setForm((f) => ({ ...f, [name]: e.target.value }))
     if (error) setError('')
+    if (fieldErrors[name]) {
+      setFieldErrors((prev) => ({ ...prev, [name]: [] }))
+    }
   }
 
   const loginMutation = useMutation({
@@ -28,10 +34,12 @@ export default function Login() {
       navigate('/', { replace: true })
     },
     onError: (err: any) => {
-      setError(
-        err.response?.data?.message ||
-          'Unable to connect to server. Make sure the backend is running.'
+      const { formError, fieldErrors } = parseApiError(
+        err,
+        'Unable to connect to server. Make sure the backend is running.'
       )
+      setError(formError)
+      setFieldErrors(fieldErrors)
     }
   })
 
@@ -41,11 +49,19 @@ export default function Login() {
     e.preventDefault()
     const trimmedUsername = form.username.trim()
     const trimmedPassword = form.password.trim()
-    if (!trimmedUsername || !trimmedPassword) {
+    
+    const errors: Record<string, string[]> = {}
+    if (!trimmedUsername) errors.username = ['Username is required.']
+    if (!trimmedPassword) errors.password = ['Password is required.']
+    
+    if (Object.keys(errors).length > 0) {
       setError('Username and password are required.')
+      setFieldErrors(errors)
       return
     }
+    
     setError('')
+    setFieldErrors({})
     loginMutation.mutate({ username: trimmedUsername, password: trimmedPassword })
   }
 
@@ -88,9 +104,9 @@ export default function Login() {
           <div className="login-sub">Sign in to continue to BillingApp</div>
 
           {error && (
-            <div className="login-err">
-              <AlertCircle size={15} />
-              {error}
+            <div className="login-err" style={{ alignItems: 'flex-start' }}>
+              <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+              <div style={{ flex: 1 }}>{error}</div>
             </div>
           )}
 
@@ -98,7 +114,7 @@ export default function Login() {
             <div className="fgrp">
               <label className="flabel">Username</label>
               <input
-                className="finput"
+                className={`finput ${fieldErrors.username?.length ? 'err' : ''}`}
                 name="username"
                 value={form.username}
                 onChange={onChange}
@@ -107,13 +123,16 @@ export default function Login() {
                 maxLength={100}
                 autoFocus
               />
+              {fieldErrors.username?.map((errMsg, idx) => (
+                <div key={idx} className="ferr">{errMsg}</div>
+              ))}
             </div>
 
             <div className="fgrp">
               <label className="flabel">Password</label>
               <div className="pw-wrap">
                 <input
-                  className="finput"
+                  className={`finput ${fieldErrors.password?.length ? 'err' : ''}`}
                   type="password"
                   name="password"
                   value={form.password}
@@ -132,6 +151,9 @@ export default function Login() {
                   {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              {fieldErrors.password?.map((errMsg, idx) => (
+                <div key={idx} className="ferr">{errMsg}</div>
+              ))}
             </div>
 
             <button

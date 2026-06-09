@@ -9,8 +9,26 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Download, Printer } from 'lucide-react'
 import axios from 'axios'
 import client from '../api/client'
-import qrCodeUrl from '../assets/qr_code.jpeg'
-import signatureUrl from '../assets/signature.jpg'
+// Use Vite's glob import to dynamically find assets if they exist, preventing compile-time resolution errors if missing.
+const assets = import.meta.glob('../assets/*.{png,jpg,jpeg,gif,svg}', {
+  eager: true,
+  query: '?inline'
+})
+
+const getAssetUrl = (prefix: string): string | null => {
+  const key = Object.keys(assets).find((k) => {
+    const fileName = k.replace('../assets/', '').toLowerCase()
+    return fileName.startsWith(prefix.toLowerCase())
+  })
+  if (key) {
+    const mod = assets[key] as any
+    return mod?.default || null
+  }
+  return null
+}
+
+const qrCodeUrl = getAssetUrl('qr_code')
+const signatureUrl = getAssetUrl('signature')
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types  (aligned with InvoiceSerializer + InvoiceItemSerializer)
@@ -80,7 +98,7 @@ interface Company {
 
 const fmt = (v: string | number | null | undefined, dp = 2) => {
   const n = parseFloat(String(v ?? 0))
-  return isNaN(n) ? '0.00' : n.toFixed(dp)
+  return isNaN(n) ? (0).toFixed(dp) : n.toFixed(dp)
 }
 
 const fmtDate = (d: string | null | undefined) => {
@@ -91,20 +109,43 @@ const fmtDate = (d: string | null | undefined) => {
 }
 
 // Indian number-to-words
-const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven',
-  'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen',
-  'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
-const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty',
-  'Sixty', 'Seventy', 'Eighty', 'Ninety']
+const ones = [
+  '',
+  'One',
+  'Two',
+  'Three',
+  'Four',
+  'Five',
+  'Six',
+  'Seven',
+  'Eight',
+  'Nine',
+  'Ten',
+  'Eleven',
+  'Twelve',
+  'Thirteen',
+  'Fourteen',
+  'Fifteen',
+  'Sixteen',
+  'Seventeen',
+  'Eighteen',
+  'Nineteen'
+]
+const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
 
 function toWords(n: number): string {
   if (n === 0) return 'Zero'
   if (n < 20) return ones[n]
   if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '')
-  if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + toWords(n % 100) : '')
-  if (n < 100000) return toWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + toWords(n % 1000) : '')
-  if (n < 10000000) return toWords(Math.floor(n / 100000)) + ' Lakh' + (n % 100000 ? ' ' + toWords(n % 100000) : '')
-  return toWords(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 ? ' ' + toWords(n % 10000000) : '')
+  if (n < 1000)
+    return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + toWords(n % 100) : '')
+  if (n < 100000)
+    return toWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + toWords(n % 1000) : '')
+  if (n < 10000000)
+    return toWords(Math.floor(n / 100000)) + ' Lakh' + (n % 100000 ? ' ' + toWords(n % 100000) : '')
+  return (
+    toWords(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 ? ' ' + toWords(n % 10000000) : '')
+  )
 }
 
 function amountInWords(amount: number): string {
@@ -115,31 +156,38 @@ function amountInWords(amount: number): string {
   return result + ' Only'
 }
 
-function formatCompanyAddress(address: string | null, city: string | null, pincode: string | null): string[] {
-  const parts = (address ?? '').split(',').map(p => p.trim()).filter(Boolean);
-  const lines: string[] = [];
+function formatCompanyAddress(
+  address: string | null,
+  city: string | null,
+  pincode: string | null
+): string[] {
+  const parts = (address ?? '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+  const lines: string[] = []
 
   if (parts.length <= 2) {
-    if (parts.length > 0) lines.push(parts.join(', ') + ',');
+    if (parts.length > 0) lines.push(parts.join(', ') + ',')
   } else if (parts.length === 3) {
-    lines.push(parts[0] + ', ' + parts[1] + ',');
-    lines.push(parts[2] + ',');
+    lines.push(parts[0] + ', ' + parts[1] + ',')
+    lines.push(parts[2] + ',')
   } else {
-    lines.push(parts[0] + ', ' + parts[1] + ',');
-    lines.push(parts[2] + ',');
-    lines.push(parts.slice(3).join(', ') + ',');
+    lines.push(parts[0] + ', ' + parts[1] + ',')
+    lines.push(parts[2] + ',')
+    lines.push(parts.slice(3).join(', ') + ',')
   }
 
-  const cityPin = [city, pincode].filter(Boolean).join('-');
+  const cityPin = [city, pincode].filter(Boolean).join('-')
   if (cityPin) {
     if (lines.length > 0) {
-      const lastIdx = lines.length - 1;
-      lines[lastIdx] = lines[lastIdx] + ' ' + cityPin;
+      const lastIdx = lines.length - 1
+      lines[lastIdx] = lines[lastIdx] + ' ' + cityPin
     } else {
-      lines.push(cityPin);
+      lines.push(cityPin)
     }
   }
-  return lines;
+  return lines
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,8 +207,9 @@ body {
   print-color-adjust: exact;
 }
 .invoice-wrap {
-  width: 100%;
+  width: calc(100% - 2px);
   border: 1.5px solid #000;
+  border-right: 1.5px solid #000;
   min-height: 270mm;
   display: flex;
   flex-direction: column;
@@ -223,14 +272,20 @@ body {
 `
 
 const toBase64 = (url: string): Promise<string> => {
+  if (url.startsWith('data:')) {
+    return Promise.resolve(url)
+  }
   return fetch(url)
     .then((response) => response.blob())
-    .then((blob) => new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onloadend = () => resolve(reader.result as string)
-      reader.onerror = reject
-      reader.readAsDataURL(blob)
-    }))
+    .then(
+      (blob) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,41 +317,39 @@ function InvoiceDocument({
   const roundOff = parseFloat(invoice.round_off ?? '0')
   const grandTotal = parseFloat(invoice.grand_total ?? '0')
 
-  const emptyRows = Math.max(0, 18 - (invoice.items?.length ?? 0)) //----------------------------------------------------------------------------------------------------------------------------------------------
+  const emptyRows = Math.max(0, 10 - (invoice.items?.length ?? 0)) //----------------------------------------------------------------------------------------------------------------------------------------------
   const invoiceTypeLabel = isTax ? 'TAX INVOICE' : 'RETAIL INVOICE'
 
   let gstNote = ''
   if (isTax && isInterstate) {
-    gstNote = `GST ${subtotal.toFixed(2)} × ${gstPct}% = ${igst.toFixed(2)} IGST  |  THANKS CUSTOMER`
+    gstNote = `GST ${fmt(subtotal)} × ${gstPct}% = ${fmt(igst)} IGST  |  THANKS CUSTOMER`
   } else if (isTax) {
-    gstNote = `GST ${subtotal.toFixed(2)} × ${halfPct}+${halfPct}% = ${cgst.toFixed(2)} CGST + ${sgst.toFixed(2)} SGST  |  THANKS CUSTOMER`
+    gstNote = `GST ${fmt(subtotal)} × ${halfPct}+${halfPct}% = ${fmt(cgst)} CGST + ${fmt(sgst)} SGST  |  THANKS CUSTOMER`
   } else {
     gstNote = 'NON-GST INVOICE  |  THANKS CUSTOMER'
   }
 
   return (
     <div className="invoice-wrap">
-
       {/* 1. TITLE BAR */}
       <div className="title-bar">
         <div className="bill-type">{invoiceTypeLabel}</div>
         <div className="company-name">{(company.company_name ?? '').toUpperCase()}</div>
         <div className="company-addr">
-          {formatCompanyAddress(company.address, company.city, company.pincode).map((line, index) => (
-            <div key={index}>{line}</div>
-          ))}
+          {formatCompanyAddress(company.address, company.city, company.pincode).map(
+            (line, index) => (
+              <div key={index}>{line}</div>
+            )
+          )}
           <div style={{ marginTop: 2 }}>
             Phone&nbsp;:&nbsp;{company.phone || '—'}
-            &nbsp;&nbsp;&nbsp;&nbsp;
-            E-Mail&nbsp;:&nbsp;{company.email || '—'}
+            &nbsp;&nbsp;&nbsp;&nbsp; E-Mail&nbsp;:&nbsp;{company.email || '—'}
           </div>
         </div>
       </div>
 
       {/* 2. GSTIN STRIP */}
-      <div className="gstin-strip">
-        GSTIN&nbsp;:&nbsp;{company.gstin || 'N/A'}
-      </div>
+      {isTax && <div className="gstin-strip">GSTIN&nbsp;:&nbsp;{company.gstin || 'N/A'}</div>}
 
       {/* 3. CUSTOMER ↔ INVOICE META */}
       <div className="info-row">
@@ -308,19 +361,21 @@ function InvoiceDocument({
           <br />
           PH.NO.&nbsp;:&nbsp;{invoice.customer_mobile || '—'}
           <br />
-          {invoice.customer_gstin && <>GSTIN&nbsp;:&nbsp;{invoice.customer_gstin}</>}
+          {isTax && invoice.customer_gstin && <>GSTIN&nbsp;:&nbsp;{invoice.customer_gstin}</>}
         </div>
 
         <div className="info-col">
           <table className="meta-table">
             <tbody>
-              {([
-                ['Invoice No.', <strong key="no">{invoice.invoice_number}</strong>],
-                ['Date', <strong key="date">{fmtDate(invoice.invoice_date)}</strong>],
-                ['Order No.', ''],
-                ['Transport', ''],
-                ['Due Date', fmtDate(invoice.due_date)],
-              ] as [string, React.ReactNode][]).map(([label, val]) => (
+              {(
+                [
+                  ['Invoice No.', <strong key="no">{invoice.invoice_number}</strong>],
+                  ['Date', <strong key="date">{fmtDate(invoice.invoice_date)}</strong>],
+                  ['Order No.', ''],
+                  ['Transport', ''],
+                  ['Due Date', fmtDate(invoice.due_date)]
+                ] as [string, React.ReactNode][]
+              ).map(([label, val]) => (
                 <tr key={label}>
                   <td>{label}</td>
                   <td>:&nbsp;{val}</td>
@@ -337,17 +392,18 @@ function InvoiceDocument({
           <tr>
             <th style={{ width: 28 }}>SN.</th>
             <th>PRODUCT NAME</th>
-            <th style={{ width: 70 }}>HSN CODE</th>
+            {isTax && <th style={{ width: 70 }}>HSN CODE</th>}
             <th style={{ width: 42 }}>QTY</th>
             <th style={{ width: 60 }}>RATE</th>
-            {isTax && (
-              isInterstate
-                ? <th style={{ width: 48 }}>IGST&nbsp;%</th>
-                : <>
+            {isTax &&
+              (isInterstate ? (
+                <th style={{ width: 48 }}>IGST&nbsp;%</th>
+              ) : (
+                <>
                   <th style={{ width: 44 }}>SGST&nbsp;%</th>
                   <th style={{ width: 44 }}>CGST&nbsp;%</th>
                 </>
-            )}
+              ))}
             <th style={{ width: 70 }}>AMOUNT</th>
           </tr>
         </thead>
@@ -356,34 +412,59 @@ function InvoiceDocument({
             <tr key={item.item_id}>
               <td className="cen">{idx + 1}</td>
               <td>{item.product_name}</td>
-              <td className="cen">{item.hsn_code || ''}</td>
-              <td className="cen">{fmt(item.quantity, 2)}</td>
+              {isTax && <td className="cen">{item.hsn_code || ''}</td>}
+              <td className="cen">{fmt(item.quantity, 0)}</td>
               <td className="num">{fmt(item.unit_price)}</td>
-              {isTax && (
-                isInterstate
-                  ? <td className="cen">{fmt(item.gst_percentage, 2)}</td>
-                  : <>
-                    <td className="cen">{halfPct.toFixed(2)}</td>
-                    <td className="cen">{halfPct.toFixed(2)}</td>
+              {isTax &&
+                (isInterstate ? (
+                  <td className="cen">{fmt(item.gst_percentage)}</td>
+                ) : (
+                  <>
+                    <td className="cen">{fmt(halfPct)}</td>
+                    <td className="cen">{fmt(halfPct)}</td>
                   </>
-              )}
+                ))}
               <td className="num">{fmt(item.taxable_amount)}</td>
             </tr>
           ))}
           {Array.from({ length: emptyRows }).map((_, i) => {
             const isLast = i === emptyRows - 1
             return (
-              <tr className={isLast ? "empty-row filler-row" : "empty-row"} key={`e${i}`}>
-                <td /><td /><td /><td /><td />
-                {isTax && (isInterstate ? <td /> : <><td /><td /></>)}
+              <tr className={isLast ? 'empty-row filler-row' : 'empty-row'} key={`e${i}`}>
+                <td />
+                <td />
+                {isTax && <td />}
+                <td />
+                <td />
+                {isTax &&
+                  (isInterstate ? (
+                    <td />
+                  ) : (
+                    <>
+                      <td />
+                      <td />
+                    </>
+                  ))}
                 <td />
               </tr>
             )
           })}
           {emptyRows === 0 && (
             <tr className="empty-row filler-row">
-              <td /><td /><td /><td /><td />
-              {isTax && (isInterstate ? <td /> : <><td /><td /></>)}
+              <td />
+              <td />
+              {isTax && <td />}
+              <td />
+              <td />
+              {isTax &&
+                (isInterstate ? (
+                  <td />
+                ) : (
+                  <>
+                    <td />
+                    <td />
+                  </>
+                ))}
               <td />
             </tr>
           )}
@@ -398,38 +479,39 @@ function InvoiceDocument({
             <tbody>
               <tr>
                 <td className="t-label">SUB TOTAL</td>
-                <td className="t-value">{subtotal.toFixed(2)}</td>
+                <td className="t-value">{fmt(subtotal)}</td>
               </tr>
-              {isTax && (
-                isInterstate
-                  ? <tr>
+              {isTax &&
+                (isInterstate ? (
+                  <tr>
                     <td className="t-label">IGST {gstPct}%</td>
-                    <td className="t-value">{igst.toFixed(2)}</td>
+                    <td className="t-value">{fmt(igst)}</td>
                   </tr>
-                  : <>
+                ) : (
+                  <>
                     <tr>
                       <td className="t-label">SGST {halfPct}%</td>
-                      <td className="t-value">{sgst.toFixed(2)}</td>
+                      <td className="t-value">{fmt(sgst)}</td>
                     </tr>
                     <tr>
                       <td className="t-label">CGST {halfPct}%</td>
-                      <td className="t-value">{cgst.toFixed(2)}</td>
+                      <td className="t-value">{fmt(cgst)}</td>
                     </tr>
                   </>
-              )}
+                ))}
               {discount > 0 && (
                 <tr>
                   <td className="t-label">Discount</td>
-                  <td className="t-value">- {discount.toFixed(2)}</td>
+                  <td className="t-value">- {fmt(discount)}</td>
                 </tr>
               )}
               <tr>
                 <td className="t-label">Round Off</td>
-                <td className="t-value">{roundOff.toFixed(2)}</td>
+                <td className="t-value">{fmt(roundOff)}</td>
               </tr>
               <tr className="grand-row">
                 <td className="t-label">GRAND TOTAL</td>
-                <td className="t-value">{grandTotal.toFixed(2)}</td>
+                <td className="t-value">{fmt(grandTotal)}</td>
               </tr>
             </tbody>
           </table>
@@ -441,20 +523,38 @@ function InvoiceDocument({
 
       {/* 7. BOTTOM STRIP */}
       <div className="bottom-strip">
-
         <div className="bottom-col" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {isTax && (
             <div>
               <span className="col-title">Bank Details</span>
-              <span className="b-label">Bank Name</span>:&nbsp;{company.bank_name || '—'}<br />
-              <span className="b-label">A/C No.</span>:&nbsp;{company.account_number || '—'}<br />
-              <span className="b-label">IFSC Code</span>:&nbsp;{company.ifsc_code || '—'}<br />
-              <span className="b-label">Branch</span>:&nbsp;{company.city || '—'}<br />
+              <span className="b-label">Bank Name</span>:&nbsp;{company.bank_name || '—'}
+              <br />
+              <span className="b-label">A/C No.</span>:&nbsp;{company.account_number || '—'}
+              <br />
+              <span className="b-label">IFSC Code</span>:&nbsp;{company.ifsc_code || '—'}
+              <br />
+              <span className="b-label">Branch</span>:&nbsp;{company.city || '—'}
+              <br />
             </div>
           )}
           {isTax && qrCodeBase64 && (
-            <div style={{ width: 115, height: 115, border: '1.2px solid #000', padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <img src={qrCodeBase64} style={{ width: '100%', height: '100%', objectFit: 'contain' }} alt="QR Code" />
+            <div
+              style={{
+                width: 115,
+                height: 115,
+                border: '1.2px solid #000',
+                padding: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              <img
+                src={qrCodeBase64}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                alt="QR Code"
+              />
             </div>
           )}
         </div>
@@ -464,8 +564,14 @@ function InvoiceDocument({
           <ol style={{ paddingLeft: 12, margin: 0, fontSize: '9pt', lineHeight: 1.7 }}>
             <li>Goods once sold will not be taken back or exchanged.</li>
             <li>Payment must be made within the due date mentioned on the invoice.</li>
-            <li>Interest @ 1.5% per month will be charged on all outstanding amounts remaining unpaid after the due date.</li>
-            <li>All disputes arising out of this invoice shall be subject to Ahmedabad jurisdiction only.</li>
+            <li>
+              Interest @ 1.5% per month will be charged on all outstanding amounts remaining unpaid
+              after the due date.
+            </li>
+            <li>
+              All disputes arising out of this invoice shall be subject to Ahmedabad jurisdiction
+              only.
+            </li>
           </ol>
         </div>
 
@@ -473,12 +579,15 @@ function InvoiceDocument({
           <span className="for-label">For {(company.company_name ?? '').toUpperCase()}</span>
           <div className="sig-space">
             {sigBase64 && (
-              <img src={sigBase64} style={{ maxHeight: 58, maxWidth: 150, objectFit: 'contain' }} alt="Signature" />
+              <img
+                src={sigBase64}
+                style={{ maxHeight: 58, maxWidth: 150, objectFit: 'contain' }}
+                alt="Signature"
+              />
             )}
           </div>
           <span className="auth-label">Authorised Signatory</span>
         </div>
-
       </div>
     </div>
   )
@@ -513,22 +622,29 @@ export default function InvoicePrint({
   const downloadStartedRef = useRef(false)
   const [qrCodeBase64, setQrCodeBase64] = useState('')
   const [sigBase64, setSigBase64] = useState('')
+  const [assetsLoading, setAssetsLoading] = useState(true)
 
   useEffect(() => {
     // Convert asset URLs to base64 data URLs for off-screen rendering stability
     const convertAssets = async () => {
-      try {
-        const qrBase = await toBase64(qrCodeUrl)
-        setQrCodeBase64(qrBase)
-      } catch (e) {
-        console.error('Failed to load QR code asset:', e)
+      setAssetsLoading(true)
+      if (qrCodeUrl) {
+        try {
+          const qrBase = await toBase64(qrCodeUrl)
+          setQrCodeBase64(qrBase)
+        } catch (e) {
+          console.error('Failed to load QR code asset:', e)
+        }
       }
-      try {
-        const sigBase = await toBase64(signatureUrl)
-        setSigBase64(sigBase)
-      } catch (e) {
-        console.error('Failed to load signature asset:', e)
+      if (signatureUrl) {
+        try {
+          const sigBase = await toBase64(signatureUrl)
+          setSigBase64(sigBase)
+        } catch (e) {
+          console.error('Failed to load signature asset:', e)
+        }
       }
+      setAssetsLoading(false)
     }
     convertAssets()
   }, [])
@@ -542,7 +658,7 @@ export default function InvoicePrint({
       try {
         const [invRes, coRes] = await Promise.all([
           client.get(`/invoices/${resolvedInvoiceId}/`, { signal: controller.signal }),
-          client.get('/company/profile/', { signal: controller.signal }),
+          client.get('/company/profile/', { signal: controller.signal })
         ])
         setInvoice(invRes.data.data)
         setCompany(coRes.data.data)
@@ -585,7 +701,10 @@ export default function InvoicePrint({
 
       if (window.electronAPI?.saveInvoicePDF) {
         // Electron: main process opens headless window, prints to PDF, saves file
-        const result = await window.electronAPI.saveInvoicePDF(html, `${invoice.invoice_number}.pdf`)
+        const result = await window.electronAPI.saveInvoicePDF(
+          html,
+          `${invoice.invoice_number}.pdf`
+        )
         if (result && !result.success && result.reason !== 'cancelled') {
           setError(`PDF save failed: ${result.reason}`)
           if (autoDownload) {
@@ -609,7 +728,7 @@ export default function InvoicePrint({
 
   // Auto-download logic if autoDownload is set to true
   useEffect(() => {
-    if (autoDownload && !loading && invoice && company && qrCodeBase64 && sigBase64) {
+    if (autoDownload && !loading && invoice && company && !assetsLoading) {
       if (downloadStartedRef.current) return
       downloadStartedRef.current = true
 
@@ -624,7 +743,7 @@ export default function InvoicePrint({
       }
       runAutoDownload()
     }
-  }, [autoDownload, loading, invoice, company, qrCodeBase64, sigBase64])
+  }, [autoDownload, loading, invoice, company, assetsLoading])
 
   const openPrintWindow = (html: string) => {
     const w = window.open('', '_blank')
@@ -643,7 +762,9 @@ export default function InvoicePrint({
     if (autoDownload) return null
     return (
       <div className="page">
-        <div className="loading"><div className="spinner" /></div>
+        <div className="loading">
+          <div className="spinner" />
+        </div>
       </div>
     )
   }
@@ -655,7 +776,10 @@ export default function InvoicePrint({
     return (
       <div className="page">
         <div className="page-hdr">
-          <button className="btn btn-ghost btn-sm" onClick={() => (onClose ? onClose() : navigate(-1))}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => (onClose ? onClose() : navigate(-1))}
+          >
             <ArrowLeft size={15} /> Back
           </button>
         </div>
@@ -674,7 +798,6 @@ export default function InvoicePrint({
       className="page"
       style={autoDownload ? { display: 'none' } : { maxWidth: 860, margin: '0 auto' }}
     >
-
       {/* Toolbar */}
       <div className="page-hdr">
         <div>
@@ -695,13 +818,16 @@ export default function InvoicePrint({
             &nbsp;·&nbsp;
             {invoice.customer_name}
             &nbsp;·&nbsp;
-            <span style={{
-              color: invoice.payment_status === 'PAID'
-                ? 'var(--success)'
-                : invoice.payment_status === 'PARTIAL'
-                  ? 'var(--warning)'
-                  : 'var(--danger)'
-            }}>
+            <span
+              style={{
+                color:
+                  invoice.payment_status === 'PAID'
+                    ? 'var(--success)'
+                    : invoice.payment_status === 'PARTIAL'
+                      ? 'var(--warning)'
+                      : 'var(--danger)'
+              }}
+            >
               {invoice.payment_status}
             </span>
           </div>
@@ -714,34 +840,40 @@ export default function InvoicePrint({
           >
             <Printer size={14} /> Print
           </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleDownloadPDF}
-            disabled={downloading}
-          >
-            {downloading
-              ? <><div className="spinner spinner-sm" style={{ borderTopColor: '#fff' }} /> Generating…</>
-              : <><Download size={14} /> Download PDF</>
-            }
+          <button className="btn btn-primary" onClick={handleDownloadPDF} disabled={downloading}>
+            {downloading ? (
+              <>
+                <div className="spinner spinner-sm" style={{ borderTopColor: '#fff' }} />{' '}
+                Generating…
+              </>
+            ) : (
+              <>
+                <Download size={14} /> Download PDF
+              </>
+            )}
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="login-err" style={{ marginBottom: 16 }}>{error}</div>
+        <div className="login-err" style={{ marginBottom: 16 }}>
+          {error}
+        </div>
       )}
 
       {/* Invoice preview — rendered with PRINT_CSS classes applied */}
       <style>{PRINT_CSS.replace(/@page[^}]+}/g, '')}</style>
 
-      <div style={{
-        background: '#fff',
-        boxShadow: 'var(--sh-lg)',
-        borderRadius: 4,
-        padding: '8mm',
-        marginBottom: 32,
-        overflowX: 'auto',
-      }}>
+      <div
+        style={{
+          background: '#fff',
+          boxShadow: 'var(--sh-lg)',
+          borderRadius: 4,
+          padding: '8mm',
+          marginBottom: 32,
+          overflowX: 'auto'
+        }}
+      >
         {/* printRef captures the HTML that goes into the PDF */}
         <div ref={printRef}>
           <InvoiceDocument
@@ -752,7 +884,6 @@ export default function InvoicePrint({
           />
         </div>
       </div>
-
     </div>
   )
 }

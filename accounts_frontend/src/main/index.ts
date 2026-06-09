@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
-import { writeFile } from 'fs'
+import { writeFile, unlink } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
@@ -128,16 +128,21 @@ function registerIpcHandlers(): void {
       }
     })
 
-    try {
-      // 3. Load HTML as data URL
-      //    encodeURIComponent handles special characters in invoice content
-      const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`
-      await pdfWin.loadURL(dataUrl)
+    const tempFilePath = join(app.getPath('temp'), `invoice_${Date.now()}.html`)
 
-      // 4. Settle delay — lets Courier New and background fills render
+    try {
+      // 3. Write HTML to temporary file
+      await new Promise<void>((resolve, reject) => {
+        writeFile(tempFilePath, htmlContent, { encoding: 'utf8' }, (err) => (err ? reject(err) : resolve()))
+      })
+
+      // 4. Load the temp HTML file
+      await pdfWin.loadFile(tempFilePath)
+
+      // 5. Settle delay — lets Courier New and background fills render
       await new Promise((resolve) => setTimeout(resolve, 600))
 
-      // 5. Generate PDF bytes
+      // 6. Generate PDF bytes
       const pdfData = await pdfWin.webContents.printToPDF({
         pageSize: 'A4',
         printBackground: true,   // required for #e8e8e8 gstin strip, #d0d0d0 headers
@@ -150,12 +155,12 @@ function registerIpcHandlers(): void {
         }
       })
 
-      // 6. Write to disk
+      // 7. Write to disk
       await new Promise<void>((resolve, reject) => {
         writeFile(filePath, pdfData, (err) => (err ? reject(err) : resolve()))
       })
 
-      // 7. Open in default PDF viewer
+      // 8. Open in default PDF viewer
       shell.openPath(filePath)
 
       return { success: true, filePath }
@@ -165,6 +170,12 @@ function registerIpcHandlers(): void {
       return { success: false, reason: message }
     } finally {
       pdfWin.destroy()
+      // Clean up temporary HTML file
+      unlink(tempFilePath, (err) => {
+        if (err) {
+          console.error('Failed to delete temp HTML print file:', err)
+        }
+      })
     }
   })
 }

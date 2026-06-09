@@ -92,7 +92,6 @@ CREATE TABLE customers (
     contact_person      VARCHAR(255),
 
     gstin               VARCHAR(15),
-    pan_number          VARCHAR(10),
 
     address             TEXT,
     city                VARCHAR(100),
@@ -102,7 +101,7 @@ CREATE TABLE customers (
     mobile              VARCHAR(20),
     email               VARCHAR(255),
 
-    default_rate        DECIMAL(10,2) DEFAULT 0,
+    default_rate        DECIMAL(12,4) DEFAULT 0,
     status              CHAR(1) NOT NULL DEFAULT 'A',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by          INT,

@@ -31,13 +31,13 @@ class InvoiceSerializer(serializers.Serializer):
     invoice_date    = serializers.DateField(required=True)
     financial_year  = serializers.CharField(max_length=10,  required=False)
     due_date        = serializers.DateField(required=False,  allow_null=True)
-    subtotal        = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+    subtotal        = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     cgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     sgst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     igst_amount     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     discount_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0.00)
     round_off       = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
-    grand_total     = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+    grand_total     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     due_amount      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     payment_status = serializers.ChoiceField(choices=['PENDING', 'PAID', 'PARTIAL'], required=False, default='PENDING')
     status          = serializers.CharField(max_length=1,   required=False)
@@ -60,7 +60,13 @@ class InvoiceSerializer(serializers.Serializer):
     items = InvoiceItemSerializer(many=True, required=False)
     
     def validate(self, data):
-        subtotal = data.get('subtotal', 0) or 0
+        subtotal = data.get('subtotal')
+        if subtotal is None:
+            items = data.get('items', [])
+            subtotal = sum((item.get('quantity', 0) * item.get('unit_price', 0)) for item in items)
+        else:
+            subtotal = subtotal or 0
+
         discount = data.get('discount_amount', 0) or 0
         if discount > subtotal:
             raise serializers.ValidationError(

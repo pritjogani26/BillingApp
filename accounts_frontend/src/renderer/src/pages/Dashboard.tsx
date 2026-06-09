@@ -14,8 +14,12 @@ import { useAuth } from '../context/AuthContext'
 import client from '../api/client'
 
 /* ── helpers ─────────────────────────────────────────────── */
-const inr = (n: number | string | null | undefined) =>
-  n == null ? '₹0' : '₹' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
+const inr = (n: number | string | null | undefined) => {
+  if (n == null) return '₹0.00'
+  const val = Number(n)
+  if (isNaN(val)) return '₹0.00'
+  return '₹' + val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 const greeting = () => {
   const h = new Date().getHours()
@@ -102,7 +106,7 @@ export default function Dashboard() {
       <div className="page-hdr">
         <div>
           <div className="page-title">
-            {greeting()}, {user?.full_name?.split(' ')[0] || 'there'} 👋
+            {greeting()}, {user?.full_name?.split(' ')[0] || 'there'}
           </div>
           <div className="page-sub">Here's a snapshot of this month</div>
         </div>

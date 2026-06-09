@@ -39,6 +39,7 @@
         .invoice-wrap {
             width: 100%;
             border: 1.5px solid #000;
+            border-right: 1.5px solid #000;
             min-height: 270mm;
             /* nearly full A4 height */
             display: flex;
@@ -395,9 +396,11 @@
         <!-- ═══════════════════════════════════════════════════════════════════════
        2. GSTIN STRIP
        ═══════════════════════════════════════════════════════════════════════ -->
+        {% if is_tax %}
         <div class="gstin-strip">
             GSTIN&nbsp;:&nbsp;{{ company.gstin|default:"N/A" }}
         </div>
+        {% endif %}
 
         <!-- ═══════════════════════════════════════════════════════════════════════
        3. CUSTOMER ↔ INVOICE META
@@ -412,7 +415,7 @@
                 {% if invoice.customer_state %}&nbsp;&nbsp;State&nbsp;:&nbsp;{{ invoice.customer_state }}{% endif %}
                 <br>
                 PH.NO.&nbsp;:&nbsp;{{ invoice.customer_mobile|default:"—" }}<br>
-                {% if invoice.customer_gstin %}
+                {% if is_tax and invoice.customer_gstin %}
                 GSTIN&nbsp;:&nbsp;{{ invoice.customer_gstin }}
                 {% endif %}
             </div>
@@ -461,7 +464,9 @@
                 <tr>
                     <th style="width:28px;">SN.</th>
                     <th>PRODUCT NAME</th>
+                    {% if is_tax %}
                     <th style="width:70px;">HSN CODE</th>
+                    {% endif %}
                     <th style="width:42px;">QTY</th>
                     <th style="width:60px;">RATE</th>
 
@@ -483,9 +488,11 @@
                 <tr>
                     <td class="cen">{{ forloop.counter }}</td>
                     <td>{{ item.product_name }}</td>
+                    {% if is_tax %}
                     <td class="cen">{{ item.hsn_code|default:"" }}</td>
-                    <td class="cen">{{ item.quantity }}</td>
-                    <td class="num">{{ item.unit_price }}</td>
+                    {% endif %}
+                    <td class="cen">{{ item.quantity|floatformat:0 }}</td>
+                    <td class="num">{{ item.unit_price|floatformat:2 }}</td>
 
                     {% if is_tax %}
                     {% if is_interstate %}
@@ -496,7 +503,7 @@
                     {% endif %}
                     {% endif %}
 
-                    <td class="num">{{ item.total_amount }}</td>
+                    <td class="num">{{ item.total_amount|floatformat:2 }}</td>
                 </tr>
                 {% endfor %}
 
@@ -505,7 +512,9 @@
                 <tr class="empty-row">
                     <td></td>
                     <td></td>
+                    {% if is_tax %}
                     <td></td>
+                    {% endif %}
                     <td></td>
                     <td></td>
                     {% if is_tax %}

@@ -59,11 +59,19 @@ interface MonthlySalesRow {
 }
 
 /* ── Helpers ── */
-const inr = (n: number | string | null | undefined) =>
-  n == null
-    ? '₹0.00'
-    : '₹' +
-      Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const inr = (n: number | string | null | undefined) => {
+  if (n == null) return '₹0.00'
+  const val = Number(n)
+  if (isNaN(val)) return '₹0.00'
+  return '₹' + val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const fmtVal = (n: number | string | null | undefined) => {
+  if (n == null) return '0.00'
+  const val = Number(n)
+  if (isNaN(val)) return '0.00'
+  return val.toFixed(2)
+}
 
 const fmt = (d: string) =>
   new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -708,7 +716,7 @@ export default function Reports() {
                           <td colSpan={3}></td>
                           <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{inr(secInvoiceValue)}</td>
                           <td colSpan={3}></td>
-                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{secQty.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(secQty)}</td>
                           <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{inr(secAmount)}</td>
                           <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{inr(secTaxable)}</td>
                           <td></td>
@@ -733,7 +741,7 @@ export default function Reports() {
                             <td>{r.local_central}</td>
                             <td>{r.invoice_type}</td>
                             <td>{r.hsn_code || '—'}</td>
-                            <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{Number(r.quantity || 0).toFixed(2)}</td>
+                            <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(r.quantity)}</td>
                             <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{inr(r.amount)}</td>
                             <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{inr(r.taxable_value)}</td>
                             <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{Number(r.sgst_pct || 0).toFixed(1)}%</td>
@@ -758,7 +766,7 @@ export default function Reports() {
                     </td>
                     <td colSpan={3}></td>
                     <td style={{ padding: '10px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      {totalQty.toFixed(2)}
+                      {fmtVal(totalQty)}
                     </td>
                     <td style={{ padding: '10px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                       {inr(totalAmount)}
@@ -832,7 +840,7 @@ export default function Reports() {
                         )}
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                        {Number(r.total_qty).toFixed(2)}
+                        {fmtVal(r.total_qty)}
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                         {inr(r.taxable_value)}

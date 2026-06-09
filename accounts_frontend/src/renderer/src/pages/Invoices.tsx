@@ -2,9 +2,10 @@
 
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, Eye, X, AlertCircle, FileText, Trash2, CreditCard, Printer, Download } from 'lucide-react'
+import { Search, Plus, Eye, Edit, X, AlertCircle, FileText, Trash2, CreditCard, Printer, Download } from 'lucide-react'
 import client from '../api/client'
 import InvoicePrint from './InvoicePrint'
+import { parseApiError } from '../utils/errorHelper'
 
 /* ── Types ─────────────────────────────────────────── */
 interface Customer {
@@ -64,11 +65,19 @@ interface Invoice {
 }
 
 /* ── Helpers ───────────────────────────────────────── */
-const inr = (n: number | string | null | undefined) =>
-  n == null
-    ? '₹0.00'
-    : '₹' +
-    Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const inr = (n: number | string | null | undefined) => {
+  if (n == null) return '₹0.00'
+  const val = Number(n)
+  if (isNaN(val)) return '₹0.00'
+  return '₹' + val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const fmtVal = (n: number | string | null | undefined) => {
+  if (n == null) return '0.00'
+  const val = Number(n)
+  if (isNaN(val)) return '0.00'
+  return val.toFixed(2)
+}
 
 const fmt = (d: string) => {
   if (!d) return ''
@@ -178,12 +187,16 @@ export default function Invoices() {
     reference_number: '',
     notes: ''
   })
-  const [payError, setPayError] = useState('')
+  const [payError, setPayError] = useState<React.ReactNode>('')
+  const [payFieldErrors, setPayFieldErrors] = useState<Record<string, string[]>>({})
 
   // Create form
   const [cform, setCform] = useState(getInitialCform())
   const [items, setItems] = useState<InvoiceItem[]>([emptyItem()])
-  const [cformError, setCformError] = useState('')
+  const [cformError, setCformError] = useState<React.ReactNode>('')
+  const [cfieldErrors, setCfieldErrors] = useState<Record<string, string[]>>({})
+  const [editInvoiceId, setEditInvoiceId] = useState<number | null>(null)
+  const [editInvoiceNumber, setEditInvoiceNumber] = useState<string>('')
 
   const [fyFilter, setFyFilter] = useState(getCurrentFinancialYear())
   const [monthFilter, setMonthFilter] = useState<number>(new Date().getMonth() + 1)
@@ -250,11 +263,37 @@ export default function Invoices() {
       setShowCreate(false)
       setCform(getInitialCform())
       setItems([emptyItem()])
+      setCfieldErrors({})
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
     onError: (err: any) => {
-      setCformError(err.response?.data?.message || 'Error creating invoice.')
+      const { formError, fieldErrors } = parseApiError(err, 'Error creating invoice.')
+      setCformError(formError)
+      setCfieldErrors(fieldErrors)
+    }
+  })
+
+  const updateInvoiceMutation = useMutation({
+    mutationFn: async ({ invoiceId, payload }: { invoiceId: number; payload: any }) => {
+      const res = await client.put(`/invoices/${invoiceId}/`, payload)
+      return res.data
+    },
+    onSuccess: () => {
+      setShowCreate(false)
+      setEditInvoiceId(null)
+      setEditInvoiceNumber('')
+      setCform(getInitialCform())
+      setItems([emptyItem()])
+      setCfieldErrors({})
+      queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      queryClient.invalidateQueries({ queryKey: ['invoiceDetail'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+    onError: (err: any) => {
+      const { formError, fieldErrors } = parseApiError(err, 'Error updating invoice.')
+      setCformError(formError)
+      setCfieldErrors(fieldErrors)
     }
   })
 
@@ -267,23 +306,61 @@ export default function Invoices() {
       setShowPay(false)
       setShowDetail(false)
       setActiveInvoiceId(null)
+      setPayFieldErrors({})
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
     onError: (err: any) => {
-      setPayError(err.response?.data?.message || 'Error recording payment.')
+      const { formError, fieldErrors } = parseApiError(err, 'Error recording payment.')
+      setPayError(formError)
+      setPayFieldErrors(fieldErrors)
     }
   })
 
-  const cformLoading = createInvoiceMutation.isPending
+  const cformLoading = createInvoiceMutation.isPending || updateInvoiceMutation.isPending
   const payLoading = createPaymentMutation.isPending
 
   /* Load dropdowns when create modal opens */
   const openCreate = () => {
+    setEditInvoiceId(null)
+    setEditInvoiceNumber('')
     setItems([emptyItem()])
     setCform(getInitialCform())
     setCformError('')
+    setCfieldErrors({})
     setShowCreate(true)
+  }
+
+  const openEdit = async (inv: Invoice) => {
+    setCformError('')
+    setCfieldErrors({})
+    try {
+      const res = await client.get(`/invoices/${inv.invoice_id}/`)
+      const data = res.data.data as Invoice
+      
+      setEditInvoiceId(inv.invoice_id)
+      setEditInvoiceNumber(data.invoice_number)
+      setCform({
+        customer_id: String(data.customer_id),
+        invoice_type: data.invoice_type,
+        invoice_date: data.invoice_date,
+        discount_amount: String(data.discount_amount),
+        notes: data.notes || ''
+      })
+      setItems(data.items ? data.items.map(it => ({
+        product_id: it.product_id || 0,
+        product_name: it.product_name || '',
+        quantity: String(it.quantity),
+        unit_price: String(it.unit_price),
+        gst_percentage: String(it.gst_percentage),
+        hsn_code: it.hsn_code || ''
+      })) : [emptyItem()])
+      
+      setShowCreate(true)
+    } catch (err: any) {
+      const { formError } = parseApiError(err, 'Failed to load invoice details for editing.')
+      alert(formError || 'Failed to load invoice details.')
+    }
   }
 
   /* View detail */
@@ -330,7 +407,7 @@ export default function Invoices() {
   const calcLine = (it: InvoiceItem) => {
     const qty = Math.max(0, Number(it.quantity) || 0),
       up = Math.max(0, Number(it.unit_price) || 0),
-      gst = (it.gst_percentage === '' || it.gst_percentage === undefined || it.gst_percentage === null) ? 18 : (Number(it.gst_percentage) || 0)
+      gst = cform.invoice_type === 'TAX' ? 18 : 0
     const taxable = qty * up
     const half = gst / 2
     const cgst = +((taxable * half) / 100).toFixed(2)
@@ -386,16 +463,22 @@ export default function Invoices() {
     setCformError('')
     const payload = {
       ...cform,
+      subtotal: totals.subtotal.toFixed(2),
+      grand_total: grandTotal.toFixed(2),
       items: items.map((it) => ({
         product_id: it.product_id ? it.product_id : null,
         product_name: it.product_name,
         quantity: it.quantity,
         unit_price: it.unit_price,
-        gst_percentage: (it.gst_percentage === '' || it.gst_percentage === undefined || it.gst_percentage === null) ? '18' : it.gst_percentage,
+        gst_percentage: cform.invoice_type === 'TAX' ? '18' : '0',
         hsn_code: it.hsn_code || null
       }))
     }
-    createInvoiceMutation.mutate(payload)
+    if (editInvoiceId) {
+      updateInvoiceMutation.mutate({ invoiceId: editInvoiceId, payload })
+    } else {
+      createInvoiceMutation.mutate(payload)
+    }
   }
 
   /* Open payment dialog */
@@ -409,7 +492,24 @@ export default function Invoices() {
       notes: ''
     })
     setPayError('')
+    setPayFieldErrors({})
     setShowPay(true)
+  }
+
+  const handleCformChange = (field: string, val: string) => {
+    setCform((prev) => ({ ...prev, [field]: val }))
+    if (cformError) setCformError('')
+    if (cfieldErrors[field]) {
+      setCfieldErrors((prev) => ({ ...prev, [field]: [] }))
+    }
+  }
+
+  const handlePayFormChange = (field: string, val: string) => {
+    setPayForm((prev) => ({ ...prev, [field]: val }))
+    if (payError) setPayError('')
+    if (payFieldErrors[field]) {
+      setPayFieldErrors((prev) => ({ ...prev, [field]: [] }))
+    }
   }
 
   /* Submit payment */
@@ -425,6 +525,7 @@ export default function Invoices() {
       return
     }
     setPayError('')
+    setPayFieldErrors({})
     createPaymentMutation.mutate({
       invoice_id: detailInv.invoice_id,
       ...payForm
@@ -611,6 +712,14 @@ export default function Invoices() {
                         </button>
                         <button
                           className="btn btn-ghost btn-sm row gap-1"
+                          onClick={() => openEdit(inv)}
+                          style={{ color: 'var(--primary)' }}
+                          title="Edit invoice"
+                        >
+                          <Edit size={13} /> Edit
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm row gap-1"
                           onClick={() => setPrintInvId(inv.invoice_id)}
                           style={{ color: 'var(--t2)' }}
                           title="Print / Download PDF"
@@ -640,7 +749,9 @@ export default function Invoices() {
         <div className="overlay">
           <div className="modal" style={{ width: 860, maxWidth: '97vw' }}>
             <div className="modal-hdr">
-              <span className="modal-title">Create New Invoice</span>
+              <span className="modal-title">
+                {editInvoiceId ? `Edit Invoice - ${editInvoiceNumber}` : 'Create New Invoice'}
+              </span>
               <button className="tb-btn" onClick={() => setShowCreate(false)}>
                 <X size={15} />
               </button>
@@ -648,9 +759,9 @@ export default function Invoices() {
             <form onSubmit={handleCreate}>
               <div className="modal-body">
                 {cformError && (
-                  <div className="login-err" style={{ marginBottom: 16 }}>
-                    <AlertCircle size={15} />
-                    {cformError}
+                  <div className="login-err" style={{ marginBottom: 16, alignItems: 'flex-start' }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ flex: 1 }}>{cformError}</div>
                   </div>
                 )}
 
@@ -659,9 +770,9 @@ export default function Invoices() {
                   <div className="fgrp">
                     <label className="flabel">Customer *</label>
                     <select
-                      className="finput"
+                      className={`finput ${cfieldErrors.customer_id?.length ? 'err' : ''}`}
                       value={cform.customer_id}
-                      onChange={(e) => setCform({ ...cform, customer_id: e.target.value })}
+                      onChange={(e) => handleCformChange('customer_id', e.target.value)}
                     >
                       <option value="">— Select Customer —</option>
                       {customers.map((c) => (
@@ -670,27 +781,36 @@ export default function Invoices() {
                         </option>
                       ))}
                     </select>
+                    {cfieldErrors.customer_id?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
                   <div className="fgrp">
                     <label className="flabel">Invoice Type</label>
                     <select
-                      className="finput"
+                      className={`finput ${cfieldErrors.invoice_type?.length ? 'err' : ''}`}
                       value={cform.invoice_type}
-                      onChange={(e) => setCform({ ...cform, invoice_type: e.target.value })}
+                      onChange={(e) => handleCformChange('invoice_type', e.target.value)}
                     >
                       <option value="TAX">TAX</option>
                       <option value="RETAIL">RETAIL</option>
                     </select>
+                    {cfieldErrors.invoice_type?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
                   <div className="fgrp">
                     <label className="flabel">Invoice Date *</label>
                     <input
-                      className="finput"
+                      className={`finput ${cfieldErrors.invoice_date?.length ? 'err' : ''}`}
                       type="date"
                       required
                       value={cform.invoice_date}
-                      onChange={(e) => setCform({ ...cform, invoice_date: e.target.value })}
+                      onChange={(e) => handleCformChange('invoice_date', e.target.value)}
                     />
+                    {cfieldErrors.invoice_date?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
                 </div>
 
@@ -741,20 +861,22 @@ export default function Invoices() {
                           >
                             Product
                           </th>
-                          <th
-                            style={{
-                              padding: '7px 10px',
-                              fontSize: 11,
-                              fontWeight: 700,
-                              color: 'var(--t3)',
-                              textAlign: 'left',
-                              letterSpacing: '.5px',
-                              textTransform: 'uppercase',
-                              width: 100
-                            }}
-                          >
-                            HSN Code
-                          </th>
+                          {cform.invoice_type === 'TAX' && (
+                            <th
+                              style={{
+                                padding: '7px 10px',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: 'var(--t3)',
+                                textAlign: 'left',
+                                letterSpacing: '.5px',
+                                textTransform: 'uppercase',
+                                width: 100
+                              }}
+                            >
+                              HSN Code
+                            </th>
+                          )}
                           <th
                             style={{
                               padding: '7px 10px',
@@ -840,22 +962,24 @@ export default function Invoices() {
                                   </datalist>
                                 )}
                               </td>
-                              <td style={{ padding: '6px 8px', width: 100 }}>
-                                <input
-                                  type="text"
-                                  className="finput"
-                                  style={{ padding: '5px 8px', fontSize: 13 }}
-                                  placeholder="HSN Code"
-                                  value={it.hsn_code || ''}
-                                  onChange={(e) => updateItem(idx, 'hsn_code', e.target.value)}
-                                />
-                              </td>
+                              {cform.invoice_type === 'TAX' && (
+                                <td style={{ padding: '6px 8px', width: 100 }}>
+                                  <input
+                                    type="text"
+                                    className="finput"
+                                    style={{ padding: '5px 8px', fontSize: 13 }}
+                                    placeholder="HSN Code"
+                                    value={it.hsn_code || ''}
+                                    onChange={(e) => updateItem(idx, 'hsn_code', e.target.value)}
+                                  />
+                                </td>
+                              )}
                               <td style={{ padding: '6px 8px' }}>
                                 <input
                                   className="finput"
                                   type="number"
-                                  step="0.01"
-                                  min="0.01"
+                                  step="0.0001"
+                                  min="0.0001"
                                   style={{ padding: '5px 8px', fontSize: 13, textAlign: 'right' }}
                                   value={it.quantity}
                                   onChange={(e) => updateItem(idx, 'quantity', e.target.value)}
@@ -865,7 +989,7 @@ export default function Invoices() {
                                 <input
                                   className="finput"
                                   type="number"
-                                  step="0.01"
+                                  step="0.0001"
                                   min="0"
                                   style={{ padding: '5px 8px', fontSize: 13, textAlign: 'right' }}
                                   value={it.unit_price}
@@ -873,18 +997,19 @@ export default function Invoices() {
                                 />
                               </td>
                               <td style={{ padding: '6px 8px' }}>
-                                <select
+                                <input
                                   className="finput"
-                                  style={{ padding: '5px 8px', fontSize: 13, textAlign: 'right' }}
-                                  value={it.gst_percentage || '18'}
-                                  onChange={(e) => updateItem(idx, 'gst_percentage', e.target.value)}
-                                >
-                                  <option value="0">0%</option>
-                                  <option value="5">5%</option>
-                                  <option value="12">12%</option>
-                                  <option value="18">18%</option>
-                                  <option value="28">28%</option>
-                                </select>
+                                  style={{
+                                    padding: '5px 8px',
+                                    fontSize: 13,
+                                    textAlign: 'right',
+                                    background: '#F1F5F9',
+                                    color: '#475569',
+                                    cursor: 'not-allowed'
+                                  }}
+                                  value={cform.invoice_type === 'TAX' ? '18%' : '0%'}
+                                  readOnly
+                                />
                               </td>
                               <td
                                 style={{
@@ -928,26 +1053,32 @@ export default function Invoices() {
                     <div className="fgrp" style={{ flex: 2 }}>
                       <label className="flabel">Notes</label>
                       <textarea
-                        className="finput"
+                        className={`finput ${cfieldErrors.notes?.length ? 'err' : ''}`}
                         rows={2}
                         value={cform.notes}
-                        onChange={(e) => setCform({ ...cform, notes: e.target.value })}
+                        onChange={(e) => handleCformChange('notes', e.target.value)}
                         placeholder="Optional delivery or payment notes..."
                         style={{ resize: 'none', fontFamily: 'var(--font)' }}
                       />
+                      {cfieldErrors.notes?.map((errMsg, idx) => (
+                        <div key={idx} className="ferr">{errMsg}</div>
+                      ))}
                     </div>
                     <div className="fgrp" style={{ flex: 1 }}>
                       <label className="flabel">Discount Amount (₹)</label>
                       <input
                         type="number"
-                        step="0.01"
-                        className="finput"
+                        step="0.0001"
+                        className={`finput ${cfieldErrors.discount_amount?.length ? 'err' : ''}`}
                         min="0"
                         max={totals.total}
                         value={cform.discount_amount}
-                        onChange={(e) => setCform({ ...cform, discount_amount: e.target.value })}
-                        placeholder="0.00"
+                        onChange={(e) => handleCformChange('discount_amount', e.target.value)}
+                        placeholder="0.0000"
                       />
+                      {cfieldErrors.discount_amount?.map((errMsg, idx) => (
+                        <div key={idx} className="ferr">{errMsg}</div>
+                      ))}
                     </div>
                   </div>
                   <div style={{ width: 220 }}>
@@ -1005,8 +1136,8 @@ export default function Invoices() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={cformLoading}>
-                  {cformLoading ? 'Creating...' : 'Create Invoice'}
+                 <button type="submit" className="btn btn-primary" disabled={cformLoading}>
+                  {cformLoading ? (editInvoiceId ? 'Saving...' : 'Creating...') : (editInvoiceId ? 'Save Changes' : 'Create Invoice')}
                 </button>
               </div>
             </form>
@@ -1037,6 +1168,17 @@ export default function Invoices() {
                     <CreditCard size={13} /> Record Payment
                   </button>
                 )}
+                <button
+                  className="btn btn-outline btn-sm row gap-1"
+                  onClick={() => {
+                    setShowDetail(false)
+                    openEdit(detailInv)
+                  }}
+                  disabled={detailLoading}
+                  style={{ color: '#fff', borderColor: '#4A6080' }}
+                >
+                  <Edit size={13} /> Edit
+                </button>
                 <button
                   className="tb-btn"
                   onClick={() => {
@@ -1095,7 +1237,7 @@ export default function Invoices() {
                           {detailInv.customer_address}
                         </div>
                       )}
-                      {detailInv.customer_gstin && (
+                      {detailInv.invoice_type === 'TAX' && detailInv.customer_gstin && (
                         <div className="fs12 t2" style={{ marginTop: 4 }}>
                           GSTIN:{' '}
                           <span style={{ fontFamily: 'monospace' }}>
@@ -1254,7 +1396,7 @@ export default function Invoices() {
                             <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                               <td style={{ padding: '9px 12px', fontWeight: 500 }}>
                                 {it.product_name || `Product #${it.product_id}`}
-                                {it.hsn_code && (
+                                {detailInv.invoice_type === 'TAX' && it.hsn_code && (
                                   <span className="fs12 t3" style={{ marginLeft: 6 }}>
                                     HSN: {it.hsn_code}
                                   </span>
@@ -1267,7 +1409,7 @@ export default function Invoices() {
                                   fontVariantNumeric: 'tabular-nums'
                                 }}
                               >
-                                {Number(it.quantity).toFixed(2)}
+                                {fmtVal(it.quantity)}
                               </td>
                               <td
                                 style={{
@@ -1421,9 +1563,9 @@ export default function Invoices() {
             <form onSubmit={handlePay}>
               <div className="modal-body">
                 {payError && (
-                  <div className="login-err" style={{ marginBottom: 12 }}>
-                    <AlertCircle size={15} />
-                    {payError}
+                  <div className="login-err" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ flex: 1 }}>{payError}</div>
                   </div>
                 )}
                 <div
@@ -1455,32 +1597,38 @@ export default function Invoices() {
                   <div className="fgrp">
                     <label className="flabel">Amount (₹) *</label>
                     <input
-                      className="finput"
+                      className={`finput ${payFieldErrors.amount?.length ? 'err' : ''}`}
                       type="number"
-                      step="0.01"
-                      min="0.01"
+                      step="0.0001"
+                      min="0.0001"
                       max={Number(detailInv.due_amount)}
                       value={payForm.amount}
-                      onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+                      onChange={(e) => handlePayFormChange('amount', e.target.value)}
                     />
+                    {payFieldErrors.amount?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
                   <div className="fgrp">
                     <label className="flabel">Payment Date *</label>
                     <input
-                      className="finput"
+                      className={`finput ${payFieldErrors.payment_date?.length ? 'err' : ''}`}
                       type="date"
                       value={payForm.payment_date}
-                      onChange={(e) => setPayForm({ ...payForm, payment_date: e.target.value })}
+                      onChange={(e) => handlePayFormChange('payment_date', e.target.value)}
                     />
+                    {payFieldErrors.payment_date?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
                 </div>
                 <div className="fgrid2">
                   <div className="fgrp">
                     <label className="flabel">Payment Method</label>
                     <select
-                      className="finput"
+                      className={`finput ${payFieldErrors.payment_method?.length ? 'err' : ''}`}
                       value={payForm.payment_method}
-                      onChange={(e) => setPayForm({ ...payForm, payment_method: e.target.value })}
+                      onChange={(e) => handlePayFormChange('payment_method', e.target.value)}
                     >
                       <option value="NEFT">NEFT</option>
                       <option value="RTGS">RTGS</option>
@@ -1489,25 +1637,34 @@ export default function Invoices() {
                       <option value="CASH">Cash</option>
                       <option value="CARD">Card</option>
                     </select>
+                    {payFieldErrors.payment_method?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
                   <div className="fgrp">
                     <label className="flabel">Reference / UTR</label>
                     <input
-                      className="finput"
+                      className={`finput ${payFieldErrors.reference_number?.length ? 'err' : ''}`}
                       value={payForm.reference_number}
-                      onChange={(e) => setPayForm({ ...payForm, reference_number: e.target.value })}
+                      onChange={(e) => handlePayFormChange('reference_number', e.target.value)}
                       placeholder="Optional ref. number"
                     />
+                    {payFieldErrors.reference_number?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
                 </div>
                 <div className="fgrp">
                   <label className="flabel">Notes</label>
                   <input
-                    className="finput"
+                    className={`finput ${payFieldErrors.notes?.length ? 'err' : ''}`}
                     value={payForm.notes}
-                    onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })}
+                    onChange={(e) => handlePayFormChange('notes', e.target.value)}
                     placeholder="Optional payment note"
                   />
+                  {payFieldErrors.notes?.map((errMsg, idx) => (
+                    <div key={idx} className="ferr">{errMsg}</div>
+                  ))}
                 </div>
               </div>
               <div className="modal-ftr">

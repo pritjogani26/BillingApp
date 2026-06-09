@@ -1,5 +1,5 @@
 // accounts_frontend\src\renderer\src\components\Layout.tsx
-import React, { Component, ErrorInfo, ReactNode } from 'react'
+import { Component, ErrorInfo, ReactNode } from 'react'
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 

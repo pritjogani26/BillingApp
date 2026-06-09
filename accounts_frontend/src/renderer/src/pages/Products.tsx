@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Search, Plus, Edit3, Trash2, X, AlertCircle, Package } from 'lucide-react'
 import client from '../api/client'
+import { parseApiError } from '../utils/errorHelper'
 
 interface Product {
   product_id: number
@@ -18,11 +19,26 @@ interface Product {
   status: string
 }
 
-const inr = (n: number | string | null | undefined) =>
-  n == null
-    ? '₹0'
-    : '₹' +
-      Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const inr = (n: number | string | null | undefined) => {
+  if (n == null) return '₹0.00'
+  const val = Number(n)
+  if (isNaN(val)) return '₹0.00'
+  return '₹' + val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const inr4 = (n: number | string | null | undefined) => {
+  if (n == null) return '₹0.0000'
+  const val = Number(n)
+  if (isNaN(val)) return '₹0.0000'
+  return '₹' + val.toLocaleString('en-IN', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+}
+
+const fmtVal = (n: number | string | null | undefined) => {
+  if (n == null) return '0.00'
+  const val = Number(n)
+  if (isNaN(val)) return '0.00'
+  return val.toFixed(2)
+}
 
 const initialForm = {
   customer_id: '',
@@ -45,7 +61,8 @@ export default function Products() {
   const [selected, setSelected] = useState<Product | null>(null)
 
   const [form, setForm] = useState(initialForm)
-  const [formError, setFormError] = useState('')
+  const [formError, setFormError] = useState<React.ReactNode>('')
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({})
 
   // Debounce search changes
   useEffect(() => {
@@ -81,10 +98,13 @@ export default function Products() {
     },
     onSuccess: () => {
       setShowAddModal(false)
+      setFieldErrors({})
       queryClient.invalidateQueries({ queryKey: ['products'] })
     },
     onError: (err: any) => {
-      setFormError(err.response?.data?.message || 'Failed to create product.')
+      const { formError, fieldErrors } = parseApiError(err, 'Failed to create product.')
+      setFormError(formError)
+      setFieldErrors(fieldErrors)
     }
   })
 
@@ -96,10 +116,13 @@ export default function Products() {
     },
     onSuccess: () => {
       setShowEditModal(false)
+      setFieldErrors({})
       queryClient.invalidateQueries({ queryKey: ['products'] })
     },
     onError: (err: any) => {
-      setFormError(err.response?.data?.message || 'Failed to update product.')
+      const { formError, fieldErrors } = parseApiError(err, 'Failed to update product.')
+      setFormError(formError)
+      setFieldErrors(fieldErrors)
     }
   })
 
@@ -138,13 +161,18 @@ export default function Products() {
   const handleInput = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    setForm({ ...form, [e.target.name]: e.target.value })
+    const { name } = e.target
+    setForm({ ...form, [name]: e.target.value })
     if (formError) setFormError('')
+    if (fieldErrors[name]) {
+      setFieldErrors((prev) => ({ ...prev, [name]: [] }))
+    }
   }
 
   const openAdd = () => {
     setForm(initialForm)
     setFormError('')
+    setFieldErrors({})
     setShowAddModal(true)
   }
 
@@ -161,6 +189,7 @@ export default function Products() {
       description: p.description || ''
     })
     setFormError('')
+    setFieldErrors({})
     setShowEditModal(true)
   }
 
@@ -168,9 +197,11 @@ export default function Products() {
     e.preventDefault()
     if (!form.product_name.trim()) {
       setFormError('Product name is required.')
+      setFieldErrors({ product_name: ['Product name is required.'] })
       return
     }
     setFormError('')
+    setFieldErrors({})
     const payload = {
       ...form,
       customer_id: form.customer_id !== '' ? form.customer_id : null
@@ -183,9 +214,11 @@ export default function Products() {
     if (!selected) return
     if (!form.product_name.trim()) {
       setFormError('Product name is required.')
+      setFieldErrors({ product_name: ['Product name is required.'] })
       return
     }
     setFormError('')
+    setFieldErrors({})
     const payload = {
       ...form,
       customer_id: form.customer_id !== '' ? form.customer_id : null
@@ -201,16 +234,16 @@ export default function Products() {
   const renderFormBody = () => (
     <div className="modal-body">
       {formError && (
-        <div className="login-err" style={{ marginBottom: 16 }}>
-          <AlertCircle size={15} />
-          {formError}
+        <div className="login-err" style={{ marginBottom: 16, alignItems: 'flex-start' }}>
+          <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ flex: 1 }}>{formError}</div>
         </div>
       )}
 
       <div className="fgrp">
         <label className="flabel">Customer Mapping *</label>
         <select
-          className="finput"
+          className={`finput ${fieldErrors.customer_id?.length ? 'err' : ''}`}
           name="customer_id"
           value={form.customer_id}
           onChange={handleInput}
@@ -219,46 +252,66 @@ export default function Products() {
           <option value="">— Select Customer —</option>
           {customers.map((c) => (
             <option key={c.customer_id} value={c.customer_id}>
-              {c.customer_name} (Rate: ₹{parseFloat(c.default_rate).toFixed(2)}/sq ft)
+              {c.customer_name} (Rate: {inr4(c.default_rate)}/sq ft)
             </option>
           ))}
         </select>
+        {fieldErrors.customer_id?.map((errMsg, idx) => (
+          <div key={idx} className="ferr">
+            {errMsg}
+          </div>
+        ))}
       </div>
 
       <div className="fgrp">
         <label className="flabel">Product / Service Name *</label>
         <input
-          className="finput"
+          className={`finput ${fieldErrors.product_name?.length ? 'err' : ''}`}
           name="product_name"
           value={form.product_name}
           onChange={handleInput}
           placeholder="e.g. Flex Banner 13oz"
           required
         />
+        {fieldErrors.product_name?.map((errMsg, idx) => (
+          <div key={idx} className="ferr">
+            {errMsg}
+          </div>
+        ))}
       </div>
 
       <div className="fgrid2">
         <div className="fgrp">
           <label className="flabel">HSN Code</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.hsn_code?.length ? 'err' : ''}`}
             name="hsn_code"
             value={form.hsn_code}
             onChange={handleInput}
             placeholder="e.g. 4911"
           />
+          {fieldErrors.hsn_code?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
         <div className="fgrp">
           <label className="flabel">GST %</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.gst_percentage?.length ? 'err' : ''}`}
             name="gst_percentage"
             type="number"
-            step="0.01"
+            step="0.0001"
             value={form.gst_percentage}
             onChange={handleInput}
-            placeholder="18.00"
+            placeholder="18.0000"
           />
+          {fieldErrors.gst_percentage?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -266,48 +319,61 @@ export default function Products() {
         <div className="fgrp">
           <label className="flabel">Height (ft)</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.height?.length ? 'err' : ''}`}
             name="height"
             type="number"
-            step="0.01"
+            step="0.0001"
             value={form.height}
             onChange={handleInput}
-            placeholder="0.00"
+            placeholder="0.0000"
           />
+          {fieldErrors.height?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
         <div className="fgrp">
           <label className="flabel">Width (ft)</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.width?.length ? 'err' : ''}`}
             name="width"
             type="number"
-            step="0.01"
+            step="0.0001"
             value={form.width}
             onChange={handleInput}
-            placeholder="0.00"
+            placeholder="0.0000"
           />
+          {fieldErrors.width?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
         <div className="fgrp">
           <label className="flabel">Unit Price (₹) *</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.unit_price?.length ? 'err' : ''}`}
             name="unit_price"
             type="number"
-            step="0.01"
+            step="0.0001"
             value={form.unit_price}
             onChange={handleInput}
-            placeholder="0.00"
-            readOnly
-            style={{ background: '#F1F5F9', color: '#475569', cursor: 'not-allowed' }}
-            title="Calculated automatically: Height × Width × Customer Rate / 100 (Excluding GST)"
+            placeholder="0.0000"
+            title="Calculated automatically (Height × Width × Default Rate / 100) or override manually"
           />
+          {fieldErrors.unit_price?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
       </div>
 
       <div className="fgrp">
         <label className="flabel">Description</label>
         <textarea
-          className="finput"
+          className={`finput ${fieldErrors.description?.length ? 'err' : ''}`}
           name="description"
           rows={2}
           value={form.description}
@@ -315,6 +381,11 @@ export default function Products() {
           placeholder="Optional product description..."
           style={{ resize: 'none', fontFamily: 'var(--font)' }}
         />
+        {fieldErrors.description?.map((errMsg, idx) => (
+          <div key={idx} className="ferr">
+            {errMsg}
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -404,7 +475,7 @@ export default function Products() {
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                       {Number(p.height) > 0 || Number(p.width) > 0 ? (
                         <span className="fs12 t2">
-                          {Number(p.height).toFixed(2)} × {Number(p.width).toFixed(2)} ft
+                           {fmtVal(p.height)} × {fmtVal(p.width)} ft
                         </span>
                       ) : (
                         <span className="t3 fs12">—</span>
@@ -413,7 +484,7 @@ export default function Products() {
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{inr(p.unit_price)}</td>
                     <td style={{ textAlign: 'right' }}>
                       <span className="badge badge-yellow">
-                        {Number(p.gst_percentage).toFixed(1)}%
+                        {fmtVal(p.gst_percentage)}%
                       </span>
                     </td>
                     <td>

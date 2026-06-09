@@ -24,7 +24,7 @@ class LedgerEntriesView(generics.GenericAPIView):
         customer = query_one(
             """
             SELECT customer_id, company_id, customer_name, contact_person,
-                   gstin, pan_number, address, city, state,
+                   gstin, address, city, state,
                    pincode, mobile, email, default_rate, status,
                    created_at, created_by, updated_at, updated_by
             FROM   customers

@@ -17,6 +17,7 @@ import {
 import client from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import BackupSection from './BackupSection'
+import { parseApiError } from '../utils/errorHelper'
 
 
 interface CompanyData {
@@ -61,7 +62,9 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState('')
 
   // UI state
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: React.ReactNode | string } | null>(null)
+  const [companyFieldErrors, setCompanyFieldErrors] = useState<Record<string, string[]>>({})
+  const [passwordFieldErrors, setPasswordFieldErrors] = useState<Record<string, string[]>>({})
 
   // Queries
   const { data: companyProfileData, isLoading: loadingCompany } = useQuery({
@@ -74,11 +77,11 @@ export default function Settings() {
 
   const company = companyProfileData || null
 
-  const showNotification = (type: 'success' | 'error', text: string) => {
+  const showNotification = (type: 'success' | 'error', text: React.ReactNode | string) => {
     setMessage({ type, text })
     setTimeout(() => {
       setMessage(null)
-    }, 4000)
+    }, 6000)
   }
 
   // Mutations
@@ -89,11 +92,14 @@ export default function Settings() {
     },
     onSuccess: () => {
       setIsEditingCompany(false)
+      setCompanyFieldErrors({})
       queryClient.invalidateQueries({ queryKey: ['companyProfile'] })
       showNotification('success', 'Company profile updated successfully')
     },
     onError: (err: any) => {
-      showNotification('error', err.response?.data?.message || 'Failed to update company profile')
+      const { formError, fieldErrors } = parseApiError(err, 'Failed to update company profile')
+      showNotification('error', formError)
+      setCompanyFieldErrors(fieldErrors)
     }
   })
 
@@ -107,9 +113,12 @@ export default function Settings() {
       setOldPassword('')
       setNewPassword('')
       setConfirmPassword('')
+      setPasswordFieldErrors({})
     },
     onError: (err: any) => {
-      showNotification('error', err.response?.data?.message || 'Old password incorrect')
+      const { formError, fieldErrors } = parseApiError(err, 'Failed to change password')
+      showNotification('error', formError)
+      setPasswordFieldErrors(fieldErrors)
     }
   })
 
@@ -130,7 +139,49 @@ export default function Settings() {
         ifsc_code: company.ifsc_code ?? ''
       })
     }
+    setCompanyFieldErrors({})
     setIsEditingCompany(true)
+  }
+
+  const handleCompanyFieldChange = (field: keyof CompanyData, val: string) => {
+    setCompanyForm((prev) => ({ ...prev, [field]: val }))
+    if (companyFieldErrors[field]) {
+      setCompanyFieldErrors((prev) => ({ ...prev, [field]: [] }))
+    }
+  }
+
+  const handlePasswordChange = (
+    field: 'old_password' | 'new_password' | 'confirm_password',
+    val: string
+  ) => {
+    if (field === 'old_password') {
+      setOldPassword(val)
+      if (passwordFieldErrors.old_password) {
+        setPasswordFieldErrors((prev) => ({ ...prev, old_password: [] }))
+      }
+    }
+    if (field === 'new_password') {
+      setNewPassword(val)
+      if (passwordFieldErrors.new_password) {
+        setPasswordFieldErrors((prev) => ({ ...prev, new_password: [] }))
+      }
+    }
+    if (field === 'confirm_password') {
+      setConfirmPassword(val)
+      if (passwordFieldErrors.confirm_password) {
+        setPasswordFieldErrors((prev) => ({ ...prev, confirm_password: [] }))
+      }
+    }
+  }
+
+  const handleTabChange = (tab: typeof activeTab) => {
+    setActiveTab(tab)
+    setMessage(null)
+    setCompanyFieldErrors({})
+    setPasswordFieldErrors({})
+    setOldPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
   }
 
   // Handle Company Save
@@ -174,7 +225,7 @@ export default function Settings() {
           className={`badge ${message.type === 'success' ? 'badge-green' : 'badge-red'}`}
           style={{
             display: 'flex',
-            alignItems: 'center',
+            alignItems: message.type === 'error' ? 'flex-start' : 'center',
             gap: '8px',
             padding: '12px 18px',
             borderRadius: 'var(--r-lg)',
@@ -185,8 +236,12 @@ export default function Settings() {
             boxShadow: 'var(--sh)'
           }}
         >
-          {message.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
-          <span>{message.text}</span>
+          {message.type === 'success' ? (
+            <Check size={16} />
+          ) : (
+            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+          )}
+          <div style={{ flex: 1 }}>{message.text}</div>
         </div>
       )}
 
@@ -214,7 +269,7 @@ export default function Settings() {
             Subsections
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {([
+             {([
               { key: 'company', icon: Store, label: 'Company Profile' },
               { key: 'user', icon: User, label: 'User Profile' },
               { key: 'password', icon: Lock, label: 'Change Password' },
@@ -222,7 +277,7 @@ export default function Settings() {
             ] as const).map(({ key, icon: Icon, label }) => (
               <button
                 key={key}
-                onClick={() => setActiveTab(key)}
+                onClick={() => handleTabChange(key)}
                 className="btn btn-ghost"
                 style={{
                   justifyContent: 'flex-start',
@@ -286,123 +341,150 @@ export default function Settings() {
               </div>
 
               <div style={{ padding: '24px' }}>
-                {isEditingCompany ? (
+                 {isEditingCompany ? (
                   <form onSubmit={handleCompanySave}>
                     <div className="fgrid2">
                       <div className="fgrp span2">
                         <label className="flabel">Company Name</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.company_name?.length ? 'err' : ''}`}
                           required
                           value={companyForm.company_name}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, company_name: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('company_name', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.company_name?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp">
                         <label className="flabel">GSTIN</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.gstin?.length ? 'err' : ''}`}
                           required
                           maxLength={15}
                           value={companyForm.gstin}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, gstin: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('gstin', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.gstin?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp">
                         <label className="flabel">PAN Number</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.pan_number?.length ? 'err' : ''}`}
                           required
                           maxLength={10}
                           value={companyForm.pan_number}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, pan_number: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('pan_number', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.pan_number?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp span2">
                         <label className="flabel">Address</label>
                         <textarea
                           rows={2}
-                          className="finput"
+                          className={`finput ${companyFieldErrors.address?.length ? 'err' : ''}`}
                           style={{ resize: 'none', fontFamily: 'inherit' }}
                           required
                           value={companyForm.address}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, address: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('address', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.address?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp">
                         <label className="flabel">City</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.city?.length ? 'err' : ''}`}
                           required
                           value={companyForm.city}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, city: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('city', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.city?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp">
                         <label className="flabel">State</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.state?.length ? 'err' : ''}`}
                           required
                           value={companyForm.state}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, state: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('state', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.state?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp">
                         <label className="flabel">Pincode</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.pincode?.length ? 'err' : ''}`}
                           required
                           maxLength={6}
                           value={companyForm.pincode}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, pincode: e.target.value.replace(/\D/g, '') })
+                            handleCompanyFieldChange('pincode', e.target.value.replace(/\D/g, ''))
                           }
                         />
+                        {companyFieldErrors.pincode?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp">
                         <label className="flabel">Phone</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.phone?.length ? 'err' : ''}`}
                           required
                           maxLength={20}
                           value={companyForm.phone}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, phone: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('phone', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.phone?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp">
                         <label className="flabel">Email Address</label>
                         <input
                           type="email"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.email?.length ? 'err' : ''}`}
                           required
                           value={companyForm.email}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, email: e.target.value.toLowerCase() })
+                            handleCompanyFieldChange('email', e.target.value.toLowerCase())
                           }
                         />
+                        {companyFieldErrors.email?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
-
+ 
                       <div
                         className="span2"
                         style={{
@@ -418,44 +500,53 @@ export default function Settings() {
                       >
                         Bank Details
                       </div>
-
+ 
                       <div className="fgrp span2">
                         <label className="flabel">Bank Name</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.bank_name?.length ? 'err' : ''}`}
                           required
                           value={companyForm.bank_name}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, bank_name: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('bank_name', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.bank_name?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp">
                         <label className="flabel">Account Number</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.account_number?.length ? 'err' : ''}`}
                           required
                           maxLength={100}
                           value={companyForm.account_number}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, account_number: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('account_number', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.account_number?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                       <div className="fgrp">
                         <label className="flabel">IFSC Code</label>
                         <input
                           type="text"
-                          className="finput"
+                          className={`finput ${companyFieldErrors.ifsc_code?.length ? 'err' : ''}`}
                           required
                           maxLength={11}
                           value={companyForm.ifsc_code}
                           onChange={(e) =>
-                            setCompanyForm({ ...companyForm, ifsc_code: e.target.value.toUpperCase() })
+                            handleCompanyFieldChange('ifsc_code', e.target.value.toUpperCase())
                           }
                         />
+                        {companyFieldErrors.ifsc_code?.map((errMsg, idx) => (
+                          <div key={idx} className="ferr">{errMsg}</div>
+                        ))}
                       </div>
                     </div>
 
@@ -747,36 +838,45 @@ export default function Settings() {
                     <label className="flabel">Current System Password</label>
                     <input
                       type="password"
-                      className="finput"
+                      className={`finput ${passwordFieldErrors.old_password?.length ? 'err' : ''}`}
                       required
                       placeholder="Enter your current password"
                       value={oldPassword}
-                      onChange={(e) => setOldPassword(e.target.value)}
+                      onChange={(e) => handlePasswordChange('old_password', e.target.value)}
                     />
+                    {passwordFieldErrors.old_password?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
-
+ 
                   <div className="fgrp" style={{ marginTop: '18px' }}>
                     <label className="flabel">New Secure Password</label>
                     <input
                       type="password"
-                      className="finput"
+                      className={`finput ${passwordFieldErrors.new_password?.length ? 'err' : ''}`}
                       required
                       placeholder="At least 8 characters"
                       value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
+                      onChange={(e) => handlePasswordChange('new_password', e.target.value)}
                     />
+                    {passwordFieldErrors.new_password?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
-
+ 
                   <div className="fgrp">
                     <label className="flabel">Confirm New Password</label>
                     <input
                       type="password"
-                      className="finput"
+                      className={`finput ${passwordFieldErrors.confirm_password?.length ? 'err' : ''}`}
                       required
                       placeholder="Re-enter new password"
                       value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onChange={(e) => handlePasswordChange('confirm_password', e.target.value)}
                     />
+                    {passwordFieldErrors.confirm_password?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
                   </div>
 
                   <button

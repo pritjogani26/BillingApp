@@ -22,7 +22,7 @@ class CustomerListView(generics.GenericAPIView):
         rows = query_all(
             """
             SELECT customer_id, company_id, customer_name, contact_person,
-                   gstin, pan_number, address, city, state,
+                   gstin, address, city, state,
                    pincode, mobile, email, default_rate, status,
                    created_at, created_by, updated_at, updated_by
             FROM   customers
@@ -60,20 +60,20 @@ class CustomerListView(generics.GenericAPIView):
         row = insert_returning(
             """
             INSERT INTO customers
-                (company_id, customer_name, contact_person, gstin, pan_number,
+                (company_id, customer_name, contact_person, gstin,
                  address, city, state, pincode, mobile, email, default_rate,
                  status, created_at, created_by)
             VALUES
-                (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'A',NOW(),%s)
+                (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'A',NOW(),%s)
             RETURNING customer_id, company_id, customer_name, contact_person,
-                      gstin, pan_number, address, city, state,
+                      gstin, address, city, state,
                       pincode, mobile, email, default_rate, status,
                       created_at, created_by, updated_at, updated_by
             """,
             (
                 company_id,
                 d['customer_name'],  d.get('contact_person'),
-                d.get('gstin'),      d.get('pan_number'),
+                d.get('gstin'),
                 d.get('address'),    d.get('city'),
                 d.get('state'),      d.get('pincode'),
                 d.get('mobile'),     d.get('email'),
@@ -100,7 +100,7 @@ class CustomerDetailView(generics.GenericAPIView):
         row = query_one(
             """
             SELECT customer_id, company_id, customer_name, contact_person,
-                   gstin, pan_number, address, city, state,
+                   gstin, address, city, state,
                    pincode, mobile, email, default_rate, status,
                    created_at, created_by, updated_at, updated_by
             FROM   customers
@@ -138,7 +138,7 @@ class CustomerDetailView(generics.GenericAPIView):
             """
             UPDATE customers SET
                 customer_name  = %s, contact_person = %s,
-                gstin          = %s, pan_number     = %s,
+                gstin          = %s,
                 address        = %s, city           = %s,
                 state          = %s, pincode        = %s,
                 mobile         = %s, email          = %s,
@@ -148,7 +148,7 @@ class CustomerDetailView(generics.GenericAPIView):
             """,
             (
                 d['customer_name'],  d.get('contact_person'),
-                d.get('gstin'),      d.get('pan_number'),
+                d.get('gstin'),
                 d.get('address'),    d.get('city'),
                 d.get('state'),      d.get('pincode'),
                 d.get('mobile'),     d.get('email'),

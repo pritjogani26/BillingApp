@@ -21,7 +21,6 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "rest_framework",
     "corsheaders",
-    "drf_yasg",
 ]
 
 LOCAL_APPS = ["accounts"]
@@ -63,7 +62,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "joganiaccounts",
+        "NAME": "hariomcircuit",
         "USER": "postgres",
         "PASSWORD": "admin",
         "HOST": "localhost",

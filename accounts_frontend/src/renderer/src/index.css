@@ -727,6 +727,13 @@ select.finput {
   flex-direction: column;
   animation: slideUp 0.2s ease;
 }
+.modal form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
 .modal-sm  { width: 420px; }
 .modal-lg  { width: 820px; }
 .modal-hdr {

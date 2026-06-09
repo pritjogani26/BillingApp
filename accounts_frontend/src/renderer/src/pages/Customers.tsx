@@ -16,13 +16,13 @@ import {
   HelpCircle
 } from 'lucide-react'
 import client from '../api/client'
+import { parseApiError } from '../utils/errorHelper'
 
 interface Customer {
   customer_id: number
   customer_name: string
   contact_person: string
   gstin: string
-  pan_number: string
   address: string
   city: string
   state: string
@@ -42,20 +42,26 @@ interface LedgerSummary {
 }
 
 const inr = (n: number | string | null | undefined) => {
-  if (n == null) return '₹0'
+  if (n == null) return '₹0.00'
   const num = Number(n)
-  if (isNaN(num)) return '₹0'
+  if (isNaN(num)) return '₹0.00'
   return '₹' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const inr4 = (n: number | string | null | undefined) => {
+  if (n == null) return '₹0.0000'
+  const num = Number(n)
+  if (isNaN(num)) return '₹0.0000'
+  return '₹' + num.toLocaleString('en-IN', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
 }
 
 const initialFormState = {
   customer_name: '',
   contact_person: '',
   gstin: '',
-  pan_number: '',
   address: '',
-  city: '',
-  state: '',
+  city: 'AHMEDABAD',
+  state: 'GUJARAT',
   pincode: '',
   mobile: '',
   email: '',
@@ -75,7 +81,8 @@ export default function Customers() {
 
   // Form State
   const [form, setForm] = useState(initialFormState)
-  const [formError, setFormError] = useState('')
+  const [formError, setFormError] = useState<React.ReactNode>('')
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({})
 
   // Debounce search changes
   useEffect(() => {
@@ -114,10 +121,13 @@ export default function Customers() {
     onSuccess: () => {
       setShowAddModal(false)
       setForm(initialFormState)
+      setFieldErrors({})
       queryClient.invalidateQueries({ queryKey: ['customers'] })
     },
     onError: (err: any) => {
-      setFormError(err.response?.data?.message || 'Failed to create customer.')
+      const { formError, fieldErrors } = parseApiError(err, 'Failed to create customer.')
+      setFormError(formError)
+      setFieldErrors(fieldErrors)
     }
   })
 
@@ -129,10 +139,13 @@ export default function Customers() {
     },
     onSuccess: () => {
       setShowEditModal(false)
+      setFieldErrors({})
       queryClient.invalidateQueries({ queryKey: ['customers'] })
     },
     onError: (err: any) => {
-      setFormError(err.response?.data?.message || 'Failed to update customer.')
+      const { formError, fieldErrors } = parseApiError(err, 'Failed to update customer.')
+      setFormError(formError)
+      setFieldErrors(fieldErrors)
     }
   })
 
@@ -172,13 +185,17 @@ export default function Customers() {
       value = value.toUpperCase()
     }
 
-    setForm({ ...form, [name]: value })
+    setForm((prev) => ({ ...prev, [name]: value }))
     if (formError) setFormError('')
+    if (fieldErrors[name]) {
+      setFieldErrors((prev) => ({ ...prev, [name]: [] }))
+    }
   }
 
   const openAddModal = () => {
     setForm(initialFormState)
     setFormError('')
+    setFieldErrors({})
     setShowAddModal(true)
   }
 
@@ -186,9 +203,11 @@ export default function Customers() {
     e.preventDefault()
     if (!form.customer_name.trim()) {
       setFormError('Company Name is required.')
+      setFieldErrors({ customer_name: ['Company Name is required.'] })
       return
     }
     setFormError('')
+    setFieldErrors({})
     createCustomerMutation.mutate(form)
   }
 
@@ -198,7 +217,6 @@ export default function Customers() {
       customer_name: c.customer_name,
       contact_person: c.contact_person || '',
       gstin: c.gstin || '',
-      pan_number: c.pan_number || '',
       address: c.address || '',
       city: c.city || '',
       state: c.state || '',
@@ -208,6 +226,7 @@ export default function Customers() {
       default_rate: String(c.default_rate)
     })
     setFormError('')
+    setFieldErrors({})
     setShowEditModal(true)
   }
 
@@ -216,9 +235,11 @@ export default function Customers() {
     if (!selectedCustomer) return
     if (!form.customer_name.trim()) {
       setFormError('Company Name is required.')
+      setFieldErrors({ customer_name: ['Company Name is required.'] })
       return
     }
     setFormError('')
+    setFieldErrors({})
     updateCustomerMutation.mutate({ id: selectedCustomer.customer_id, form })
   }
 
@@ -242,7 +263,7 @@ export default function Customers() {
       <div className="fgrp">
         <label className="flabel">Company/Party Name *</label>
         <input
-          className="finput"
+          className={`finput ${fieldErrors.customer_name?.length ? 'err' : ''}`}
           name="customer_name"
           value={form.customer_name}
           onChange={handleInputChange}
@@ -250,32 +271,47 @@ export default function Customers() {
           maxLength={255}
           required
         />
+        {fieldErrors.customer_name?.map((errMsg, idx) => (
+          <div key={idx} className="ferr">
+            {errMsg}
+          </div>
+        ))}
       </div>
 
       <div className="fgrid2">
         <div className="fgrp">
           <label className="flabel">Contact Person</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.contact_person?.length ? 'err' : ''}`}
             name="contact_person"
             value={form.contact_person}
             onChange={handleInputChange}
             placeholder="Person to contact"
             maxLength={255}
           />
+          {fieldErrors.contact_person?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
         <div className="fgrp">
           <label className="flabel">Custom Rate (per unit)</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.default_rate?.length ? 'err' : ''}`}
             name="default_rate"
             type="number"
-            step="0.01"
+            step="0.0001"
             min="0"
             value={form.default_rate}
             onChange={handleInputChange}
-            placeholder="0.00"
+            placeholder="0.0000"
           />
+          {fieldErrors.default_rate?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -283,18 +319,23 @@ export default function Customers() {
         <div className="fgrp">
           <label className="flabel">Mobile No.</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.mobile?.length ? 'err' : ''}`}
             name="mobile"
             value={form.mobile}
             onChange={handleInputChange}
             placeholder="10-digit mobile number"
             maxLength={20}
           />
+          {fieldErrors.mobile?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
         <div className="fgrp">
           <label className="flabel">Email Address</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.email?.length ? 'err' : ''}`}
             name="email"
             type="email"
             value={form.email}
@@ -302,38 +343,35 @@ export default function Customers() {
             placeholder="billing@client.com"
             maxLength={255}
           />
+          {fieldErrors.email?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="fgrid2">
-        <div className="fgrp">
-          <label className="flabel">GSTIN (15-digit)</label>
-          <input
-            className="finput"
-            name="gstin"
-            value={form.gstin}
-            onChange={handleInputChange}
-            placeholder="e.g. 27AAPFU0939F1ZV"
-            maxLength={15}
-          />
-        </div>
-        <div className="fgrp">
-          <label className="flabel">PAN Card No.</label>
-          <input
-            className="finput"
-            name="pan_number"
-            value={form.pan_number}
-            onChange={handleInputChange}
-            placeholder="e.g. AAPFU0939F"
-            maxLength={10}
-          />
-        </div>
+      <div className="fgrp">
+        <label className="flabel">GSTIN (15-digit)</label>
+        <input
+          className={`finput ${fieldErrors.gstin?.length ? 'err' : ''}`}
+          name="gstin"
+          value={form.gstin}
+          onChange={handleInputChange}
+          placeholder="e.g. 27AAPFU0939F1ZV"
+          maxLength={15}
+        />
+        {fieldErrors.gstin?.map((errMsg, idx) => (
+          <div key={idx} className="ferr">
+            {errMsg}
+          </div>
+        ))}
       </div>
 
       <div className="fgrp">
         <label className="flabel">Billing Address</label>
         <textarea
-          className="finput"
+          className={`finput ${fieldErrors.address?.length ? 'err' : ''}`}
           name="address"
           rows={2}
           value={form.address}
@@ -342,41 +380,61 @@ export default function Customers() {
           maxLength={500}
           style={{ resize: 'none', fontFamily: 'var(--font)' }}
         />
+        {fieldErrors.address?.map((errMsg, idx) => (
+          <div key={idx} className="ferr">
+            {errMsg}
+          </div>
+        ))}
       </div>
 
       <div className="fgrid2" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
         <div className="fgrp">
           <label className="flabel">City</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.city?.length ? 'err' : ''}`}
             name="city"
             value={form.city}
             onChange={handleInputChange}
             placeholder="City"
             maxLength={100}
           />
+          {fieldErrors.city?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
         <div className="fgrp">
           <label className="flabel">State</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.state?.length ? 'err' : ''}`}
             name="state"
             value={form.state}
             onChange={handleInputChange}
             placeholder="State"
             maxLength={100}
           />
+          {fieldErrors.state?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
         <div className="fgrp">
           <label className="flabel">Pincode</label>
           <input
-            className="finput"
+            className={`finput ${fieldErrors.pincode?.length ? 'err' : ''}`}
             name="pincode"
             value={form.pincode}
             onChange={handleInputChange}
             placeholder="Pincode"
             maxLength={6}
           />
+          {fieldErrors.pincode?.map((errMsg, idx) => (
+            <div key={idx} className="ferr">
+              {errMsg}
+            </div>
+          ))}
         </div>
       </div>
     </>
@@ -442,7 +500,7 @@ export default function Customers() {
                   <th>Company Name</th>
                   <th>Contact Person</th>
                   <th>Contact Details</th>
-                  <th>GSTIN / PAN</th>
+                  <th>GSTIN</th>
                   <th style={{ textAlign: 'right' }}>Price Rate</th>
                   <th>Status</th>
                   <th style={{ textAlign: 'right', paddingRight: 20 }}>Actions</th>
@@ -485,18 +543,11 @@ export default function Customers() {
                         >
                           GST: {c.gstin}
                         </span>
-                      ) : c.pan_number ? (
-                        <span
-                          className="badge badge-yellow fs12"
-                          style={{ fontWeight: 600, fontFamily: 'monospace' }}
-                        >
-                          PAN: {c.pan_number}
-                        </span>
                       ) : (
                         <span className="badge badge-red fs12">Unregistered</span>
                       )}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{inr(c.default_rate)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{inr4(c.default_rate)}</td>
                     <td>
                       <span className={`badge ${c.status === 'A' ? 'badge-green' : 'badge-red'}`}>
                         {c.status === 'A' ? 'Active' : 'Inactive'}
@@ -551,9 +602,9 @@ export default function Customers() {
             <form onSubmit={handleCreateCustomer}>
               <div className="modal-body">
                 {formError && (
-                  <div className="login-err" style={{ marginBottom: 16 }}>
-                    <AlertCircle size={15} />
-                    {formError}
+                  <div className="login-err" style={{ marginBottom: 16, alignItems: 'flex-start' }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ flex: 1 }}>{formError}</div>
                   </div>
                 )}
                 {renderFormFields()}
@@ -589,9 +640,9 @@ export default function Customers() {
             <form onSubmit={handleUpdateCustomer}>
               <div className="modal-body">
                 {formError && (
-                  <div className="login-err" style={{ marginBottom: 16 }}>
-                    <AlertCircle size={15} />
-                    {formError}
+                  <div className="login-err" style={{ marginBottom: 16, alignItems: 'flex-start' }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ flex: 1 }}>{formError}</div>
                   </div>
                 )}
                 {renderFormFields()}
