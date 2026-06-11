@@ -36,3 +36,14 @@ Key Features:
 * Windows Desktop Application with Offline Capability
 
 The application is designed to simplify daily billing operations, improve financial record management, and ensure accurate GST compliance for small and medium-scale manufacturing businesses.
+
+
+
+
+
+
+cd .\accounts_backend\
+python manage.py runserver
+
+cd .\accounts_frontend\
+npm run dev
