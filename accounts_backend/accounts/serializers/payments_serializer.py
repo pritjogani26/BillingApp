@@ -5,8 +5,8 @@ from rest_framework import serializers
 class PaymentSerializer(serializers.Serializer):
     payment_id       = serializers.IntegerField(required=False)
     invoice_id       = serializers.IntegerField(required=True)
-    company_id       = serializers.IntegerField(required=True)
-    customer_id      = serializers.IntegerField(required=True)
+    company_id       = serializers.IntegerField(required=False)
+    customer_id      = serializers.IntegerField(required=False)
     payment_date     = serializers.DateField(required=True)
     payment_method = serializers.ChoiceField(
         choices=['CASH', 'CHEQUE', 'NEFT', 'RTGS', 'UPI', 'BANK', 'CARD'],

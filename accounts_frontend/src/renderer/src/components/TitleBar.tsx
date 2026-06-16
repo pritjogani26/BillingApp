@@ -23,7 +23,7 @@ export default function TitleBar() {
           <Square size={10} />
         </button>
         <button className="tb-btn tb-close" onClick={close} disabled={!hasElectron} title="Close">
-          <X size={13} />
+          <X size={16} />
         </button>
       </div>
     </div>

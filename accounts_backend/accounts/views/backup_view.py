@@ -10,6 +10,7 @@ from django.conf import settings
 from rest_framework import generics, status as http_status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from accounts.common.auth import JWTAuthentication
 
 try:
     from googleapiclient.discovery import build
@@ -64,6 +65,7 @@ class CreateBackupView(generics.GenericAPIView):
     Dumps the PostgreSQL database with pg_dump, compresses it with gzip,
     saves it locally, and — if Google Drive is configured — uploads it there.
     """
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
@@ -168,6 +170,7 @@ class ListBackupsView(generics.GenericAPIView):
     GET /backups/
     Returns a list of local backup files, newest first.
     """
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
@@ -191,6 +194,7 @@ class DeleteBackupView(generics.GenericAPIView):
     DELETE /backups/<filename>/
     Deletes a single local backup file.
     """
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, filename: str, *args, **kwargs):
@@ -225,6 +229,7 @@ class ConfigureDriveView(generics.GenericAPIView):
         credentials  – parsed JSON object from the service-account key file
         folder_id    – Google Drive folder ID (from the folder URL)
     """
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
@@ -239,7 +244,8 @@ class ConfigureDriveView(generics.GenericAPIView):
                 status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        credentials = request.data.get("credentials")
+        config = _load_config()
+        credentials = request.data.get("credentials") or config.get("credentials")
         folder_id   = (request.data.get("folder_id") or "").strip()
 
         if not credentials or not folder_id:
@@ -267,7 +273,6 @@ class ConfigureDriveView(generics.GenericAPIView):
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
 
-        config = _load_config()
         config["credentials"] = credentials
         config["folder_id"]   = folder_id
         _save_config(config)
@@ -292,6 +297,7 @@ class DriveStatusView(generics.GenericAPIView):
     GET /backups/drive/status/
     Returns the current Google Drive configuration status.
     """
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):

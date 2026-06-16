@@ -1,15 +1,13 @@
-// src/renderer/src/pages/InvoicePrint.tsx
+// src/renderer/src/pages/TaxInvoicePrint.tsx
 //
-// Renders the invoice exactly like invoice_pdf.html (monochrome, A4 layout)
-// and generates a PDF by printing the hidden #invoice-print-area div via
-// Electron's webContents.printToPDF IPC call — zero external dependencies.
+// TAX INVOICE — A4 portrait, full layout with GST columns, bank details, QR, signature.
 
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Download, Printer } from 'lucide-react'
 import axios from 'axios'
 import client from '../api/client'
-// Use Vite's glob import to dynamically find assets if they exist, preventing compile-time resolution errors if missing.
+
 const assets = import.meta.glob('../assets/*.{png,jpg,jpeg,gif,svg}', {
   eager: true,
   query: '?inline'
@@ -31,7 +29,7 @@ const qrCodeUrl = getAssetUrl('qr_code')
 const signatureUrl = getAssetUrl('signature')
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types  (aligned with InvoiceSerializer + InvoiceItemSerializer)
+// Types
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface InvoiceItem {
@@ -108,44 +106,17 @@ const fmtDate = (d: string | null | undefined) => {
   return `${parts[2]}/${parts[1]}/${parts[0]}`
 }
 
-// Indian number-to-words
-const ones = [
-  '',
-  'One',
-  'Two',
-  'Three',
-  'Four',
-  'Five',
-  'Six',
-  'Seven',
-  'Eight',
-  'Nine',
-  'Ten',
-  'Eleven',
-  'Twelve',
-  'Thirteen',
-  'Fourteen',
-  'Fifteen',
-  'Sixteen',
-  'Seventeen',
-  'Eighteen',
-  'Nineteen'
-]
-const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
+const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen']
+const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety']
 
 function toWords(n: number): string {
   if (n === 0) return 'Zero'
   if (n < 20) return ones[n]
   if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '')
-  if (n < 1000)
-    return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + toWords(n % 100) : '')
-  if (n < 100000)
-    return toWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + toWords(n % 1000) : '')
-  if (n < 10000000)
-    return toWords(Math.floor(n / 100000)) + ' Lakh' + (n % 100000 ? ' ' + toWords(n % 100000) : '')
-  return (
-    toWords(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 ? ' ' + toWords(n % 10000000) : '')
-  )
+  if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + toWords(n % 100) : '')
+  if (n < 100000) return toWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + toWords(n % 1000) : '')
+  if (n < 10000000) return toWords(Math.floor(n / 100000)) + ' Lakh' + (n % 100000 ? ' ' + toWords(n % 100000) : '')
+  return toWords(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 ? ' ' + toWords(n % 10000000) : '')
 }
 
 function amountInWords(amount: number): string {
@@ -156,17 +127,9 @@ function amountInWords(amount: number): string {
   return result + ' Only'
 }
 
-function formatCompanyAddress(
-  address: string | null,
-  city: string | null,
-  pincode: string | null
-): string[] {
-  const parts = (address ?? '')
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean)
+function formatCompanyAddress(address: string | null, city: string | null, pincode: string | null): string[] {
+  const parts = (address ?? '').split(',').map((p) => p.trim()).filter(Boolean)
   const lines: string[] = []
-
   if (parts.length <= 2) {
     if (parts.length > 0) lines.push(parts.join(', ') + ',')
   } else if (parts.length === 3) {
@@ -177,12 +140,10 @@ function formatCompanyAddress(
     lines.push(parts[2] + ',')
     lines.push(parts.slice(3).join(', ') + ',')
   }
-
   const cityPin = [city, pincode].filter(Boolean).join('-')
   if (cityPin) {
     if (lines.length > 0) {
-      const lastIdx = lines.length - 1
-      lines[lastIdx] = lines[lastIdx] + ' ' + cityPin
+      lines[lines.length - 1] = lines[lines.length - 1] + ' ' + cityPin
     } else {
       lines.push(cityPin)
     }
@@ -190,11 +151,23 @@ function formatCompanyAddress(
   return lines
 }
 
+const toBase64 = (url: string): Promise<string> => {
+  if (url.startsWith('data:')) return Promise.resolve(url)
+  return fetch(url)
+    .then((r) => r.blob())
+    .then((blob) => new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    }))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// CSS injected into the print window — mirrors invoice_pdf.html exactly
+// Print CSS — A4 portrait
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PRINT_CSS = `
+const TAX_PRINT_CSS = `
 @page { size: A4 portrait; margin: 8mm; }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { width: 100%; background: #fff; }
@@ -209,7 +182,6 @@ body {
 .invoice-wrap {
   width: calc(100% - 2px);
   border: 1.5px solid #000;
-  border-right: 1.5px solid #000;
   min-height: 270mm;
   display: flex;
   flex-direction: column;
@@ -271,28 +243,11 @@ body {
 .auth-label { font-size: 7.5pt; font-weight: bold; text-align: center; width: 100%; }
 `
 
-const toBase64 = (url: string): Promise<string> => {
-  if (url.startsWith('data:')) {
-    return Promise.resolve(url)
-  }
-  return fetch(url)
-    .then((response) => response.blob())
-    .then(
-      (blob) =>
-        new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onloadend = () => resolve(reader.result as string)
-          reader.onerror = reject
-          reader.readAsDataURL(blob)
-        })
-    )
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// InvoiceDocument — mirrors invoice_pdf.html structure with CSS classes
+// TaxInvoiceDocument
 // ─────────────────────────────────────────────────────────────────────────────
 
-function InvoiceDocument({
+function TaxInvoiceDocument({
   invoice,
   company,
   qrCodeBase64,
@@ -303,9 +258,8 @@ function InvoiceDocument({
   qrCodeBase64: string
   sigBase64: string
 }) {
-  const isTax = invoice.invoice_type === 'TAX'
   const igstTotal = parseFloat(invoice.igst_amount ?? '0')
-  const isInterstate = isTax && igstTotal > 0
+  const isInterstate = igstTotal > 0
   const gstPct = invoice.items?.[0] ? parseFloat(invoice.items[0].gst_percentage) : 0
   const halfPct = gstPct / 2
 
@@ -317,39 +271,31 @@ function InvoiceDocument({
   const roundOff = parseFloat(invoice.round_off ?? '0')
   const grandTotal = parseFloat(invoice.grand_total ?? '0')
 
-  const emptyRows = Math.max(0, 10 - (invoice.items?.length ?? 0)) //----------------------------------------------------------------------------------------------------------------------------------------------
-  const invoiceTypeLabel = isTax ? 'TAX INVOICE' : 'RETAIL INVOICE'
+  const emptyRows = Math.max(0, 10 - (invoice.items?.length ?? 0))
 
-  let gstNote = ''
-  if (isTax && isInterstate) {
-    gstNote = `GST ${fmt(subtotal)} × ${gstPct}% = ${fmt(igst)} IGST  |  THANKS CUSTOMER`
-  } else if (isTax) {
-    gstNote = `GST ${fmt(subtotal)} × ${halfPct}+${halfPct}% = ${fmt(cgst)} CGST + ${fmt(sgst)} SGST  |  THANKS CUSTOMER`
-  } else {
-    gstNote = 'NON-GST INVOICE  |  THANKS CUSTOMER'
-  }
+  const gstNote = isInterstate
+    ? `GST ${fmt(subtotal)} × ${gstPct}% = ${fmt(igst)} IGST  |  THANKS CUSTOMER`
+    : `GST ${fmt(subtotal)} × ${halfPct}+${halfPct}% = ${fmt(cgst)} CGST + ${fmt(sgst)} SGST  |  THANKS CUSTOMER`
 
   return (
     <div className="invoice-wrap">
       {/* 1. TITLE BAR */}
       <div className="title-bar">
-        <div className="bill-type">{invoiceTypeLabel}</div>
+        <div className="bill-type">TAX INVOICE</div>
         <div className="company-name">{(company.company_name ?? '').toUpperCase()}</div>
         <div className="company-addr">
-          {formatCompanyAddress(company.address, company.city, company.pincode).map(
-            (line, index) => (
-              <div key={index}>{line}</div>
-            )
-          )}
+          {formatCompanyAddress(company.address, company.city, company.pincode).map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
           <div style={{ marginTop: 2 }}>
             Phone&nbsp;:&nbsp;{company.phone || '—'}
-            &nbsp;&nbsp;&nbsp;&nbsp; E-Mail&nbsp;:&nbsp;{company.email || '—'}
+            &nbsp;&nbsp;&nbsp;&nbsp;E-Mail&nbsp;:&nbsp;{company.email || '—'}
           </div>
         </div>
       </div>
 
       {/* 2. GSTIN STRIP */}
-      {isTax && <div className="gstin-strip">GSTIN&nbsp;:&nbsp;{company.gstin || 'N/A'}</div>}
+      <div className="gstin-strip">GSTIN&nbsp;:&nbsp;{company.gstin || 'N/A'}</div>
 
       {/* 3. CUSTOMER ↔ INVOICE META */}
       <div className="info-row">
@@ -360,8 +306,12 @@ function InvoiceDocument({
           {invoice.customer_state ? `\u00a0\u00a0State\u00a0:\u00a0${invoice.customer_state}` : ''}
           <br />
           PH.NO.&nbsp;:&nbsp;{invoice.customer_mobile || '—'}
-          <br />
-          {isTax && invoice.customer_gstin && <>GSTIN&nbsp;:&nbsp;{invoice.customer_gstin}</>}
+          {invoice.customer_email && (
+            <><br />E-Mail&nbsp;:&nbsp;{invoice.customer_email}</>
+          )}
+          {invoice.customer_gstin && (
+            <><br />GSTIN&nbsp;:&nbsp;{invoice.customer_gstin}</>
+          )}
         </div>
 
         <div className="info-col">
@@ -392,18 +342,17 @@ function InvoiceDocument({
           <tr>
             <th style={{ width: 28 }}>SN.</th>
             <th>PRODUCT NAME</th>
-            {isTax && <th style={{ width: 70 }}>HSN CODE</th>}
+            <th style={{ width: 70 }}>HSN CODE</th>
             <th style={{ width: 42 }}>QTY</th>
             <th style={{ width: 60 }}>RATE</th>
-            {isTax &&
-              (isInterstate ? (
-                <th style={{ width: 48 }}>IGST&nbsp;%</th>
-              ) : (
-                <>
-                  <th style={{ width: 44 }}>SGST&nbsp;%</th>
-                  <th style={{ width: 44 }}>CGST&nbsp;%</th>
-                </>
-              ))}
+            {isInterstate ? (
+              <th style={{ width: 48 }}>IGST&nbsp;%</th>
+            ) : (
+              <>
+                <th style={{ width: 44 }}>SGST&nbsp;%</th>
+                <th style={{ width: 44 }}>CGST&nbsp;%</th>
+              </>
+            )}
             <th style={{ width: 70 }}>AMOUNT</th>
           </tr>
         </thead>
@@ -412,18 +361,17 @@ function InvoiceDocument({
             <tr key={item.item_id}>
               <td className="cen">{idx + 1}</td>
               <td>{item.product_name}</td>
-              {isTax && <td className="cen">{item.hsn_code || ''}</td>}
+              <td className="cen">{item.hsn_code || ''}</td>
               <td className="cen">{fmt(item.quantity, 0)}</td>
               <td className="num">{fmt(item.unit_price)}</td>
-              {isTax &&
-                (isInterstate ? (
-                  <td className="cen">{fmt(item.gst_percentage)}</td>
-                ) : (
-                  <>
-                    <td className="cen">{fmt(halfPct)}</td>
-                    <td className="cen">{fmt(halfPct)}</td>
-                  </>
-                ))}
+              {isInterstate ? (
+                <td className="cen">{fmt(item.gst_percentage)}</td>
+              ) : (
+                <>
+                  <td className="cen">{fmt(halfPct)}</td>
+                  <td className="cen">{fmt(halfPct)}</td>
+                </>
+              )}
               <td className="num">{fmt(item.taxable_amount)}</td>
             </tr>
           ))}
@@ -431,40 +379,16 @@ function InvoiceDocument({
             const isLast = i === emptyRows - 1
             return (
               <tr className={isLast ? 'empty-row filler-row' : 'empty-row'} key={`e${i}`}>
-                <td />
-                <td />
-                {isTax && <td />}
-                <td />
-                <td />
-                {isTax &&
-                  (isInterstate ? (
-                    <td />
-                  ) : (
-                    <>
-                      <td />
-                      <td />
-                    </>
-                  ))}
+                <td /><td /><td /><td /><td />
+                {isInterstate ? <td /> : <><td /><td /></>}
                 <td />
               </tr>
             )
           })}
           {emptyRows === 0 && (
             <tr className="empty-row filler-row">
-              <td />
-              <td />
-              {isTax && <td />}
-              <td />
-              <td />
-              {isTax &&
-                (isInterstate ? (
-                  <td />
-                ) : (
-                  <>
-                    <td />
-                    <td />
-                  </>
-                ))}
+              <td /><td /><td /><td /><td />
+              {isInterstate ? <td /> : <><td /><td /></>}
               <td />
             </tr>
           )}
@@ -481,24 +405,23 @@ function InvoiceDocument({
                 <td className="t-label">SUB TOTAL</td>
                 <td className="t-value">{fmt(subtotal)}</td>
               </tr>
-              {isTax &&
-                (isInterstate ? (
+              {isInterstate ? (
+                <tr>
+                  <td className="t-label">IGST {gstPct}%</td>
+                  <td className="t-value">{fmt(igst)}</td>
+                </tr>
+              ) : (
+                <>
                   <tr>
-                    <td className="t-label">IGST {gstPct}%</td>
-                    <td className="t-value">{fmt(igst)}</td>
+                    <td className="t-label">SGST {halfPct}%</td>
+                    <td className="t-value">{fmt(sgst)}</td>
                   </tr>
-                ) : (
-                  <>
-                    <tr>
-                      <td className="t-label">SGST {halfPct}%</td>
-                      <td className="t-value">{fmt(sgst)}</td>
-                    </tr>
-                    <tr>
-                      <td className="t-label">CGST {halfPct}%</td>
-                      <td className="t-value">{fmt(cgst)}</td>
-                    </tr>
-                  </>
-                ))}
+                  <tr>
+                    <td className="t-label">CGST {halfPct}%</td>
+                    <td className="t-value">{fmt(cgst)}</td>
+                  </tr>
+                </>
+              )}
               {discount > 0 && (
                 <tr>
                   <td className="t-label">Discount</td>
@@ -524,37 +447,19 @@ function InvoiceDocument({
       {/* 7. BOTTOM STRIP */}
       <div className="bottom-strip">
         <div className="bottom-col" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {isTax && (
-            <div>
-              <span className="col-title">Bank Details</span>
-              <span className="b-label">Bank Name</span>:&nbsp;{company.bank_name || '—'}
-              <br />
-              <span className="b-label">A/C No.</span>:&nbsp;{company.account_number || '—'}
-              <br />
-              <span className="b-label">IFSC Code</span>:&nbsp;{company.ifsc_code || '—'}
-              <br />
-              <span className="b-label">Branch</span>:&nbsp;{company.city || '—'}
-              <br />
-            </div>
-          )}
-          {isTax && qrCodeBase64 && (
-            <div
-              style={{
-                width: 115,
-                height: 115,
-                border: '1.2px solid #000',
-                padding: 2,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0
-              }}
-            >
-              <img
-                src={qrCodeBase64}
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                alt="QR Code"
-              />
+          <div>
+            <span className="col-title">Bank Details</span>
+            <span className="b-label">Bank Name</span>:&nbsp;{company.bank_name || '—'}
+            <br />
+            <span className="b-label">A/C No.</span>:&nbsp;{company.account_number || '—'}
+            <br />
+            <span className="b-label">IFSC Code</span>:&nbsp;{company.ifsc_code || '—'}
+            <br />
+            <span className="b-label">Branch</span>:&nbsp;{company.city || '—'}
+          </div>
+          {qrCodeBase64 && (
+            <div style={{ width: 115, height: 115, border: '1.2px solid #000', padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <img src={qrCodeBase64} style={{ width: '100%', height: '100%', objectFit: 'contain' }} alt="QR Code" />
             </div>
           )}
         </div>
@@ -564,14 +469,8 @@ function InvoiceDocument({
           <ol style={{ paddingLeft: 12, margin: 0, fontSize: '9pt', lineHeight: 1.7 }}>
             <li>Goods once sold will not be taken back or exchanged.</li>
             <li>Payment must be made within the due date mentioned on the invoice.</li>
-            <li>
-              Interest @ 1.5% per month will be charged on all outstanding amounts remaining unpaid
-              after the due date.
-            </li>
-            <li>
-              All disputes arising out of this invoice shall be subject to Ahmedabad jurisdiction
-              only.
-            </li>
+            <li>Interest @ 1.5% per month will be charged on all outstanding amounts remaining unpaid after the due date.</li>
+            <li>All disputes arising out of this invoice shall be subject to Ahmedabad jurisdiction only.</li>
           </ol>
         </div>
 
@@ -579,11 +478,7 @@ function InvoiceDocument({
           <span className="for-label">For {(company.company_name ?? '').toUpperCase()}</span>
           <div className="sig-space">
             {sigBase64 && (
-              <img
-                src={sigBase64}
-                style={{ maxHeight: 58, maxWidth: 150, objectFit: 'contain' }}
-                alt="Signature"
-              />
+              <img src={sigBase64} style={{ maxHeight: 58, maxWidth: 150, objectFit: 'contain' }} alt="Signature" />
             )}
           </div>
           <span className="auth-label">Authorised Signatory</span>
@@ -597,17 +492,17 @@ function InvoiceDocument({
 // Main Page
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface InvoicePrintProps {
+interface TaxInvoicePrintProps {
   invoiceId?: number | string
   onClose?: () => void
   autoDownload?: boolean
 }
 
-export default function InvoicePrint({
+export default function TaxInvoicePrint({
   invoiceId: propInvoiceId,
   onClose,
   autoDownload = false
-}: InvoicePrintProps = {}) {
+}: TaxInvoicePrintProps = {}) {
   const { invoiceId: routeInvoiceId } = useParams<{ invoiceId: string }>()
   const navigate = useNavigate()
 
@@ -625,24 +520,13 @@ export default function InvoicePrint({
   const [assetsLoading, setAssetsLoading] = useState(true)
 
   useEffect(() => {
-    // Convert asset URLs to base64 data URLs for off-screen rendering stability
     const convertAssets = async () => {
       setAssetsLoading(true)
       if (qrCodeUrl) {
-        try {
-          const qrBase = await toBase64(qrCodeUrl)
-          setQrCodeBase64(qrBase)
-        } catch (e) {
-          console.error('Failed to load QR code asset:', e)
-        }
+        try { setQrCodeBase64(await toBase64(qrCodeUrl)) } catch (e) { console.error('QR load failed', e) }
       }
       if (signatureUrl) {
-        try {
-          const sigBase = await toBase64(signatureUrl)
-          setSigBase64(sigBase)
-        } catch (e) {
-          console.error('Failed to load signature asset:', e)
-        }
+        try { setSigBase64(await toBase64(signatureUrl)) } catch (e) { console.error('Sig load failed', e) }
       }
       setAssetsLoading(false)
     }
@@ -663,20 +547,15 @@ export default function InvoicePrint({
         setInvoice(invRes.data.data)
         setCompany(coRes.data.data)
       } catch (e: any) {
-        if (!axios.isCancel(e)) {
-          setError(e?.response?.data?.message ?? 'Failed to load invoice.')
-        }
+        if (!axios.isCancel(e)) setError(e?.response?.data?.message ?? 'Failed to load invoice.')
       } finally {
         setLoading(false)
       }
     }
     load()
-    return () => {
-      controller.abort()
-    }
+    return () => controller.abort()
   }, [resolvedInvoiceId])
 
-  // Build a self-contained HTML string from the rendered React tree
   const buildPrintHTML = () => {
     const node = printRef.current
     if (!node) return ''
@@ -685,63 +564,44 @@ export default function InvoicePrint({
 <head>
 <meta charset="UTF-8"/>
 <title>${invoice?.invoice_number ?? 'invoice'}</title>
-<style>${PRINT_CSS}</style>
+<style>${TAX_PRINT_CSS}</style>
 </head>
 <body>${node.innerHTML}</body>
 </html>`
   }
 
-  // Download PDF via Electron IPC → main process printToPDF
   const handleDownloadPDF = async () => {
     if (!invoice || !company || downloading) return
     setDownloading(true)
     setError('')
     try {
       const html = buildPrintHTML()
-
       if (window.electronAPI?.saveInvoicePDF) {
-        // Electron: main process opens headless window, prints to PDF, saves file
-        const result = await window.electronAPI.saveInvoicePDF(
-          html,
-          `${invoice.invoice_number}.pdf`
-        )
+        const result = await window.electronAPI.saveInvoicePDF(html, `${invoice.invoice_number}.pdf`)
         if (result && !result.success && result.reason !== 'cancelled') {
           setError(`PDF save failed: ${result.reason}`)
-          if (autoDownload) {
-            alert(`PDF save failed: ${result.reason}`)
-          }
+          if (autoDownload) alert(`PDF save failed: ${result.reason}`)
         }
       } else {
-        // Dev browser fallback — open print dialog
         openPrintWindow(html)
       }
     } catch (e: any) {
       const errMsg = 'PDF generation failed: ' + (e?.message ?? '')
       setError(errMsg)
-      if (autoDownload) {
-        alert(errMsg)
-      }
+      if (autoDownload) alert(errMsg)
     } finally {
       setDownloading(false)
     }
   }
 
-  // Auto-download logic if autoDownload is set to true
   useEffect(() => {
     if (autoDownload && !loading && invoice && company && !assetsLoading) {
       if (downloadStartedRef.current) return
       downloadStartedRef.current = true
-
-      const runAutoDownload = async () => {
-        try {
-          await handleDownloadPDF()
-        } catch (e) {
-          console.error('Auto download failed:', e)
-        } finally {
-          onClose?.()
-        }
+      const run = async () => {
+        try { await handleDownloadPDF() } catch (e) { console.error('Auto download failed', e) } finally { onClose?.() }
       }
-      runAutoDownload()
+      run()
     }
   }, [autoDownload, loading, invoice, company, assetsLoading])
 
@@ -752,34 +612,24 @@ export default function InvoicePrint({
     w.document.write(html)
     w.document.close()
     w.focus()
-    setTimeout(() => {
-      w.print()
-    }, 500)
+    setTimeout(() => w.print(), 500)
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────
   if (loading) {
     if (autoDownload) return null
     return (
       <div className="page">
-        <div className="loading">
-          <div className="spinner" />
-        </div>
+        <div className="loading"><div className="spinner" /></div>
       </div>
     )
   }
 
   if (error && !invoice) {
-    if (autoDownload) {
-      return null
-    }
+    if (autoDownload) return null
     return (
       <div className="page">
         <div className="page-hdr">
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => (onClose ? onClose() : navigate(-1))}
-          >
+          <button className="btn btn-ghost btn-sm" onClick={() => onClose ? onClose() : navigate(-1)}>
             <ArrowLeft size={15} /> Back
           </button>
         </div>
@@ -794,89 +644,44 @@ export default function InvoicePrint({
   if (!invoice || !company) return null
 
   return (
-    <div
-      className="page"
-      style={autoDownload ? { display: 'none' } : { maxWidth: 860, margin: '0 auto' }}
-    >
+    <div className="page" style={autoDownload ? { display: 'none' } : { maxWidth: 860, margin: '0 auto' }}>
       {/* Toolbar */}
       <div className="page-hdr">
         <div>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => (onClose ? onClose() : navigate(-1))}
-            style={{ marginBottom: 8 }}
-          >
+          <button className="btn btn-ghost btn-sm" onClick={() => onClose ? onClose() : navigate(-1)} style={{ marginBottom: 8 }}>
             <ArrowLeft size={15} /> Back
           </button>
           <div className="page-title">
-            {invoice.invoice_type === 'TAX' ? 'Tax Invoice' : 'Retail Invoice'}
-            &nbsp;
-            <span style={{ color: 'var(--primary)' }}>#{invoice.invoice_number}</span>
+            Tax Invoice&nbsp;<span style={{ color: 'var(--primary)' }}>#{invoice.invoice_number}</span>
           </div>
           <div className="page-sub" style={{ marginTop: 4 }}>
-            {fmtDate(invoice.invoice_date)}
-            &nbsp;·&nbsp;
-            {invoice.customer_name}
-            &nbsp;·&nbsp;
-            <span
-              style={{
-                color:
-                  invoice.payment_status === 'PAID'
-                    ? 'var(--success)'
-                    : invoice.payment_status === 'PARTIAL'
-                      ? 'var(--warning)'
-                      : 'var(--danger)'
-              }}
-            >
+            {fmtDate(invoice.invoice_date)}&nbsp;·&nbsp;{invoice.customer_name}&nbsp;·&nbsp;
+            <span style={{ color: invoice.payment_status === 'PAID' ? 'var(--success)' : invoice.payment_status === 'PARTIAL' ? 'var(--warning)' : 'var(--danger)' }}>
               {invoice.payment_status}
             </span>
           </div>
         </div>
-
         <div className="page-hdr-actions">
-          <button
-            className="btn btn-outline btn-sm"
-            onClick={() => openPrintWindow(buildPrintHTML())}
-          >
+          <button className="btn btn-outline btn-sm" onClick={() => openPrintWindow(buildPrintHTML())}>
             <Printer size={14} /> Print
           </button>
           <button className="btn btn-primary" onClick={handleDownloadPDF} disabled={downloading}>
             {downloading ? (
-              <>
-                <div className="spinner spinner-sm" style={{ borderTopColor: '#fff' }} />{' '}
-                Generating…
-              </>
+              <><div className="spinner spinner-sm" style={{ borderTopColor: '#fff' }} /> Generating…</>
             ) : (
-              <>
-                <Download size={14} /> Download PDF
-              </>
+              <><Download size={14} /> Download PDF</>
             )}
           </button>
         </div>
       </div>
 
-      {error && (
-        <div className="login-err" style={{ marginBottom: 16 }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="login-err" style={{ marginBottom: 16 }}>{error}</div>}
 
-      {/* Invoice preview — rendered with PRINT_CSS classes applied */}
-      <style>{PRINT_CSS.replace(/@page[^}]+}/g, '')}</style>
+      <style>{TAX_PRINT_CSS.replace(/@page[^}]+}/g, '')}</style>
 
-      <div
-        style={{
-          background: '#fff',
-          boxShadow: 'var(--sh-lg)',
-          borderRadius: 4,
-          padding: '8mm',
-          marginBottom: 32,
-          overflowX: 'auto'
-        }}
-      >
-        {/* printRef captures the HTML that goes into the PDF */}
+      <div style={{ background: '#fff', boxShadow: 'var(--sh-lg)', borderRadius: 4, padding: '8mm', marginBottom: 32, overflowX: 'auto' }}>
         <div ref={printRef}>
-          <InvoiceDocument
+          <TaxInvoiceDocument
             invoice={invoice}
             company={company}
             qrCodeBase64={qrCodeBase64}

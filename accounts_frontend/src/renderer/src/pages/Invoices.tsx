@@ -4,7 +4,8 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Search, Plus, Eye, Edit, X, AlertCircle, FileText, Trash2, CreditCard, Printer, Download } from 'lucide-react'
 import client from '../api/client'
-import InvoicePrint from './InvoicePrint'
+import TaxInvoicePrint from './TaxInvoicePrint'
+import RetailInvoicePrint from './RetailInvoicePrint1'
 import { parseApiError } from '../utils/errorHelper'
 
 /* ── Types ─────────────────────────────────────────── */
@@ -1681,21 +1682,40 @@ export default function Invoices() {
       )}
 
       {/* ── Invoice Print / PDF Preview ── */}
-      {printInvId !== null && (
-        <InvoicePrint
-          invoiceId={printInvId}
-          onClose={() => setPrintInvId(null)}
-        />
-      )}
+      {printInvId !== null && (() => {
+        const inv = invoices.find((i) => i.invoice_id === printInvId)
+        if (!inv) return null
+        return inv.invoice_type === 'TAX' ? (
+          <TaxInvoicePrint
+            invoiceId={printInvId}
+            onClose={() => setPrintInvId(null)}
+          />
+        ) : (
+          <RetailInvoicePrint
+            invoiceId={printInvId}
+            onClose={() => setPrintInvId(null)}
+          />
+        )
+      })()}
 
       {/* ── Direct PDF Download (no modal shown) ── */}
-      {downloadInvId !== null && (
-        <InvoicePrint
-          invoiceId={downloadInvId}
-          onClose={() => setDownloadInvId(null)}
-          autoDownload
-        />
-      )}
+      {downloadInvId !== null && (() => {
+        const inv = invoices.find((i) => i.invoice_id === downloadInvId)
+        if (!inv) return null
+        return inv.invoice_type === 'TAX' ? (
+          <TaxInvoicePrint
+            invoiceId={downloadInvId}
+            onClose={() => setDownloadInvId(null)}
+            autoDownload
+          />
+        ) : (
+          <RetailInvoicePrint
+            invoiceId={downloadInvId}
+            onClose={() => setDownloadInvId(null)}
+            autoDownload
+          />
+        )
+      })()}
     </>
   )
 }

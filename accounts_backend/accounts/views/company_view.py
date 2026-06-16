@@ -36,12 +36,11 @@ class CompanyProfileView(generics.GenericAPIView):
                 get_message("NOT_FOUND", "Company")
             )
 
-        serializer = self.get_serializer(data=row)
-        serializer.is_valid(raise_exception=True)
+        serializer = self.get_serializer(row)
 
         return common_response(
             StatusCode.OK.value,
-            get_message("SAVED", "Company"),
+            "Company profile fetched successfully",
             serializer.data
         )
 
@@ -58,6 +57,10 @@ class CompanyProfileView(generics.GenericAPIView):
             )
 
         d = serializer.validated_data
+
+        # Clean empty strings to None (NULL) for optional fields to avoid integrity and unique constraint errors
+        def clean(val):
+            return val if (val is not None and str(val).strip() != "") else None
 
         rows_updated = execute(
             """
@@ -79,12 +82,18 @@ class CompanyProfileView(generics.GenericAPIView):
             WHERE  company_id = %s
             """,
             (
-                d['company_name'], d['gstin'],
-                d['pan_number'],   d['address'],
-                d['city'],         d['state'],
-                d['pincode'],      d['phone'],
-                d['email'],        d['bank_name'],
-                d['account_number'], d['ifsc_code'],
+                d['company_name'],
+                clean(d.get('gstin')),
+                clean(d.get('pan_number')),
+                clean(d.get('address')),
+                clean(d.get('city')),
+                clean(d.get('state')),
+                clean(d.get('pincode')),
+                clean(d.get('phone')),
+                clean(d.get('email')),
+                clean(d.get('bank_name')),
+                clean(d.get('account_number')),
+                clean(d.get('ifsc_code')),
                 user_id, company_id,
             )
         )
