@@ -762,6 +762,30 @@ select.finput {
   gap: 10px;
   flex-shrink: 0;
 }
+.modal-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--t2);
+  border: none;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.modal-close-btn:hover {
+  background: var(--bg, #f0f4fa);
+  color: var(--t1);
+}
+.modal-close-btn.dark-bg {
+  color: #94a3b8;
+}
+.modal-close-btn.dark-bg:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+}
 
 /* ═══════════════════════════════════════════════════════════
    INVOICE ITEMS TABLE  (inside create invoice modal)

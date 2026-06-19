@@ -595,8 +595,8 @@ export default function Customers() {
           <div className="modal">
             <div className="modal-hdr">
               <span className="modal-title">New Client Profile</span>
-              <button className="tb-btn" onClick={() => setShowAddModal(false)}>
-                <X size={15} />
+              <button className="modal-close-btn" onClick={() => setShowAddModal(false)}>
+                <X size={18} />
               </button>
             </div>
             <form onSubmit={handleCreateCustomer}>
@@ -633,8 +633,8 @@ export default function Customers() {
           <div className="modal">
             <div className="modal-hdr">
               <span className="modal-title">Edit Client Details</span>
-              <button className="tb-btn" onClick={() => setShowEditModal(false)}>
-                <X size={15} />
+              <button className="modal-close-btn" onClick={() => setShowEditModal(false)}>
+                <X size={18} />
               </button>
             </div>
             <form onSubmit={handleUpdateCustomer}>
@@ -674,11 +674,10 @@ export default function Customers() {
                 Ledger Account Statement
               </span>
               <button
-                className="tb-btn"
+                className="modal-close-btn dark-bg"
                 onClick={closeLedgerModal}
-                style={{ color: '#8898AA' }}
               >
-                <X size={15} />
+                <X size={18} />
               </button>
             </div>
 

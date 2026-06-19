@@ -8,7 +8,6 @@ import {
   Check,
   AlertCircle,
   Save,
-  X,
   Shield,
   KeyRound,
   Store,
@@ -258,7 +257,7 @@ export default function Settings() {
         <div className="card" style={{ padding: '8px' }}>
           <div
             style={{
-              padding: '10px 12px',
+              padding: '10px 12px 6px',
               fontSize: '10px',
               fontWeight: 700,
               color: 'var(--t3)',
@@ -282,9 +281,14 @@ export default function Settings() {
                 style={{
                   justifyContent: 'flex-start',
                   width: '100%',
-                  background: activeTab === key ? 'var(--bg)' : 'transparent',
-                  color: activeTab === key ? 'var(--primary)' : 'var(--t2)',
-                  fontWeight: activeTab === key ? 600 : 400
+                  background: activeTab === key ? 'var(--primary-light)' : 'transparent',
+                  color: activeTab === key ? 'var(--primary-dark)' : 'var(--t2)',
+                  fontWeight: activeTab === key ? 600 : 400,
+                  padding: '10px 16px',
+                  borderLeft: `3px solid ${activeTab === key ? 'var(--primary)' : 'transparent'}`,
+                  borderRadius: activeTab === key ? '0 var(--r) var(--r) 0' : 'var(--r)',
+                  transition: 'all 0.2s ease',
+                  gap: '12px'
                 }}
               >
                 <Icon
@@ -304,593 +308,534 @@ export default function Settings() {
           </div>
         ) : (
           <div className="card">
-          {/* 1) COMPANY PROFILE */}
-          {activeTab === 'company' && (
-            <div style={{ position: 'relative' }}>
-              {(loadingCompany || updateCompanyMutation.isPending) && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    background: 'rgba(255,255,255,0.7)',
-                    zIndex: 10,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <div className="spinner" />
-                </div>
-              )}
-
-              <div className="card-hdr" style={{ background: '#f8fafc' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Building size={18} color="var(--primary)" />
-                  <span className="card-title" style={{ fontSize: '15px' }}>
-                    Company Profile Details
-                  </span>
-                </div>
-                {!isEditingCompany && (
-                  <button
-                    className="btn btn-outline btn-sm"
-                    onClick={startEditingCompany}
-                  >
-                    <Edit2 size={13} /> Edit Profile
-                  </button>
-                )}
-              </div>
-
-              <div style={{ padding: '24px' }}>
-                 {isEditingCompany ? (
-                  <form onSubmit={handleCompanySave}>
-                    <div className="fgrid2">
-                      <div className="fgrp span2">
-                        <label className="flabel">Company Name</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.company_name?.length ? 'err' : ''}`}
-                          required
-                          value={companyForm.company_name}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('company_name', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.company_name?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">GSTIN</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.gstin?.length ? 'err' : ''}`}
-                          required
-                          maxLength={15}
-                          value={companyForm.gstin}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('gstin', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.gstin?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">PAN Number</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.pan_number?.length ? 'err' : ''}`}
-                          required
-                          maxLength={10}
-                          value={companyForm.pan_number}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('pan_number', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.pan_number?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp span2">
-                        <label className="flabel">Address</label>
-                        <textarea
-                          rows={2}
-                          className={`finput ${companyFieldErrors.address?.length ? 'err' : ''}`}
-                          style={{ resize: 'none', fontFamily: 'inherit' }}
-                          required
-                          value={companyForm.address}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('address', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.address?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">City</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.city?.length ? 'err' : ''}`}
-                          required
-                          value={companyForm.city}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('city', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.city?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">State</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.state?.length ? 'err' : ''}`}
-                          required
-                          value={companyForm.state}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('state', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.state?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">Pincode</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.pincode?.length ? 'err' : ''}`}
-                          required
-                          maxLength={6}
-                          value={companyForm.pincode}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('pincode', e.target.value.replace(/\D/g, ''))
-                          }
-                        />
-                        {companyFieldErrors.pincode?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">Phone</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.phone?.length ? 'err' : ''}`}
-                          required
-                          maxLength={20}
-                          value={companyForm.phone}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('phone', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.phone?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">Email Address</label>
-                        <input
-                          type="email"
-                          className={`finput ${companyFieldErrors.email?.length ? 'err' : ''}`}
-                          required
-                          value={companyForm.email}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('email', e.target.value.toLowerCase())
-                          }
-                        />
-                        {companyFieldErrors.email?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
- 
-                      <div
-                        className="span2"
-                        style={{
-                          margin: '12px 0 6px',
-                          borderTop: '1px solid var(--border)',
-                          paddingTop: '16px',
-                          fontSize: '12px',
-                          fontWeight: 700,
-                          color: 'var(--t3)',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.5px'
-                        }}
-                      >
-                        Bank Details
-                      </div>
- 
-                      <div className="fgrp span2">
-                        <label className="flabel">Bank Name</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.bank_name?.length ? 'err' : ''}`}
-                          required
-                          value={companyForm.bank_name}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('bank_name', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.bank_name?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">Account Number</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.account_number?.length ? 'err' : ''}`}
-                          required
-                          maxLength={100}
-                          value={companyForm.account_number}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('account_number', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.account_number?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                      <div className="fgrp">
-                        <label className="flabel">IFSC Code</label>
-                        <input
-                          type="text"
-                          className={`finput ${companyFieldErrors.ifsc_code?.length ? 'err' : ''}`}
-                          required
-                          maxLength={11}
-                          value={companyForm.ifsc_code}
-                          onChange={(e) =>
-                            handleCompanyFieldChange('ifsc_code', e.target.value.toUpperCase())
-                          }
-                        />
-                        {companyFieldErrors.ifsc_code?.map((errMsg, idx) => (
-                          <div key={idx} className="ferr">{errMsg}</div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'flex-end',
-                        gap: '10px',
-                        marginTop: '16px'
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="btn btn-outline"
-                        onClick={() => {
-                          setIsEditingCompany(false)
-                        }}
-                      >
-                        <X size={15} /> Cancel
-                      </button>
-                      <button type="submit" className="btn btn-primary">
-                        <Save size={15} /> Save Changes
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <div>
-                    {company ? (
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(2, 1fr)',
-                          gap: '20px'
-                        }}
-                      >
-                        <div style={{ gridColumn: 'span 2' }}>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            Company Name
-                          </span>
-                          <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--t1)' }}>
-                            {company.company_name || '—'}
-                          </div>
-                        </div>
-
-                        <div>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            GSTIN
-                          </span>
-                          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--t1)' }}>
-                            {company.gstin || '—'}
-                          </div>
-                        </div>
-                        <div>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            PAN Number
-                          </span>
-                          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--t1)' }}>
-                            {company.pan_number || '—'}
-                          </div>
-                        </div>
-
-                        <div style={{ gridColumn: 'span 2' }}>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            Address
-                          </span>
-                          <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                            {(() => {
-                              const parts = [company.address, company.city, company.state].filter(Boolean)
-                              const mainAddress = parts.join(', ')
-                              return mainAddress
-                                ? (mainAddress + (company.pincode ? ` - ${company.pincode}` : ''))
-                                : (company.pincode || '—')
-                            })()}
-                          </div>
-                        </div>
-
-                        <div>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            Phone
-                          </span>
-                          <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                            {company.phone || '—'}
-                          </div>
-                        </div>
-                        <div>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            Email Address
-                          </span>
-                          <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                            {company.email || '—'}
-                          </div>
-                        </div>
-
-                        <div
-                          style={{
-                            gridColumn: 'span 2',
-                            margin: '10px 0 4px',
-                            borderTop: '1px solid var(--border)',
-                            paddingTop: '16px'
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: '11px',
-                              fontWeight: 700,
-                              color: 'var(--t3)',
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.5px'
-                            }}
-                          >
-                            Bank Account Information
-                          </span>
-                        </div>
-
-                        <div style={{ gridColumn: 'span 2' }}>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            Bank Name
-                          </span>
-                          <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                            {company.bank_name || '—'}
-                          </div>
-                        </div>
-                        <div>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            Account Number
-                          </span>
-                          <div
-                            style={{
-                              fontSize: '14px',
-                              fontWeight: 600,
-                              color: 'var(--t1)',
-                              fontFamily: 'monospace'
-                            }}
-                          >
-                            {company.account_number || '—'}
-                          </div>
-                        </div>
-                        <div>
-                          <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                            IFSC Code
-                          </span>
-                          <div
-                            style={{
-                              fontSize: '14px',
-                              fontWeight: 600,
-                              color: 'var(--t1)',
-                              fontFamily: 'monospace'
-                            }}
-                          >
-                            {company.ifsc_code || '—'}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ textAlign: 'center', padding: '20px', color: 'var(--t3)' }}>
-                        No company details loaded.
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* 2) USER PROFILE */}
-          {activeTab === 'user' && (
-            <div>
-              <div className="card-hdr" style={{ background: '#f8fafc' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Shield size={18} color="var(--primary)" />
-                  <span className="card-title" style={{ fontSize: '15px' }}>
-                    User Account Settings
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ padding: '24px' }}>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(2, 1fr)',
-                    gap: '20px'
-                  }}
-                >
-                  <div>
-                    <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                      User ID
-                    </span>
-                    <div
-                      style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: 'var(--t1)',
-                        fontFamily: 'monospace'
-                      }}
-                    >
-                      #{user?.user_id || 'N/A'}
-                    </div>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                      System Permission Role
-                    </span>
-                    <div>
-                      <span className="badge badge-green" style={{ textTransform: 'uppercase' }}>
-                        {user?.role || '—'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                      Account Full Name
-                    </span>
-                    <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--t1)' }}>
-                      {user?.full_name || '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '12px', color: 'var(--t3)', fontWeight: 600 }}>
-                      Username Credentials
-                    </span>
-                    <div style={{ fontSize: '13.5px', color: 'var(--t2)' }}>
-                      {user?.username || '—'}
-                    </div>
-                  </div>
-
+            {/* 1) COMPANY PROFILE */}
+            {activeTab === 'company' && (
+              <div style={{ position: 'relative' }}>
+                {(loadingCompany || updateCompanyMutation.isPending) && (
                   <div
                     style={{
-                      gridColumn: 'span 2',
-                      background: 'var(--bg)',
-                      padding: '16px',
-                      borderRadius: 'var(--r-lg)',
-                      border: '1px dashed var(--border)',
-                      marginTop: '10px'
+                      position: 'absolute',
+                      inset: 0,
+                      background: 'rgba(255,255,255,0.7)',
+                      zIndex: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
                     }}
                   >
+                    <div className="spinner" />
+                  </div>
+                )}
+
+                <div className="card-hdr" style={{ background: '#f8fafc' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Building size={18} color="var(--primary)" />
+                    <span className="card-title" style={{ fontSize: '15px' }}>
+                      Company Profile Details
+                    </span>
+                  </div>
+                  {!isEditingCompany && (
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={startEditingCompany}
+                    >
+                      <Edit2 size={13} /> Edit Profile
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ padding: '24px' }}>
+                  {isEditingCompany ? (
+                    <form onSubmit={handleCompanySave}>
+                      <div className="fgrid2">
+                        <div className="fgrp span2">
+                          <label className="flabel">Company Name</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.company_name?.length ? 'err' : ''}`}
+                            required
+                            value={companyForm.company_name}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('company_name', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.company_name?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp">
+                          <label className="flabel">GSTIN</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.gstin?.length ? 'err' : ''}`}
+                            required
+                            maxLength={15}
+                            value={companyForm.gstin}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('gstin', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.gstin?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp">
+                          <label className="flabel">PAN Number</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.pan_number?.length ? 'err' : ''}`}
+                            required
+                            maxLength={10}
+                            value={companyForm.pan_number}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('pan_number', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.pan_number?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp span2">
+                          <label className="flabel">Address</label>
+                          <textarea
+                            rows={2}
+                            className={`finput ${companyFieldErrors.address?.length ? 'err' : ''}`}
+                            style={{ resize: 'none', fontFamily: 'inherit' }}
+                            required
+                            value={companyForm.address}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('address', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.address?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp">
+                          <label className="flabel">City</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.city?.length ? 'err' : ''}`}
+                            required
+                            value={companyForm.city}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('city', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.city?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp">
+                          <label className="flabel">State</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.state?.length ? 'err' : ''}`}
+                            required
+                            value={companyForm.state}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('state', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.state?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp">
+                          <label className="flabel">Pincode</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.pincode?.length ? 'err' : ''}`}
+                            required
+                            maxLength={6}
+                            value={companyForm.pincode}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('pincode', e.target.value.replace(/\D/g, ''))
+                            }
+                          />
+                          {companyFieldErrors.pincode?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp">
+                          <label className="flabel">Phone</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.phone?.length ? 'err' : ''}`}
+                            required
+                            maxLength={20}
+                            value={companyForm.phone}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('phone', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.phone?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp">
+                          <label className="flabel">Email Address</label>
+                          <input
+                            type="email"
+                            className={`finput ${companyFieldErrors.email?.length ? 'err' : ''}`}
+                            required
+                            value={companyForm.email}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('email', e.target.value.toLowerCase())
+                            }
+                          />
+                          {companyFieldErrors.email?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+   
+                        <div
+                          className="span2"
+                          style={{
+                            margin: '12px 0 6px',
+                            borderTop: '1px solid var(--border)',
+                            paddingTop: '16px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            color: 'var(--t3)',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.5px'
+                          }}
+                        >
+                          Bank Details
+                        </div>
+   
+                        <div className="fgrp span2">
+                          <label className="flabel">Bank Name</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.bank_name?.length ? 'err' : ''}`}
+                            required
+                            value={companyForm.bank_name}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('bank_name', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.bank_name?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp">
+                          <label className="flabel">Account Number</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.account_number?.length ? 'err' : ''}`}
+                            required
+                            maxLength={100}
+                            value={companyForm.account_number}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('account_number', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.account_number?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                        <div className="fgrp">
+                          <label className="flabel">IFSC Code</label>
+                          <input
+                            type="text"
+                            className={`finput ${companyFieldErrors.ifsc_code?.length ? 'err' : ''}`}
+                            required
+                            maxLength={11}
+                            value={companyForm.ifsc_code}
+                            onChange={(e) =>
+                              handleCompanyFieldChange('ifsc_code', e.target.value.toUpperCase())
+                            }
+                          />
+                          {companyFieldErrors.ifsc_code?.map((errMsg, idx) => (
+                            <div key={idx} className="ferr">{errMsg}</div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'flex-end',
+                          gap: '10px',
+                          marginTop: '16px'
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          onClick={() => {
+                            setIsEditingCompany(false)
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button type="submit" className="btn btn-primary">
+                          <Save size={15} /> Save Changes
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div>
+                      {company ? (
+                        <div>
+                          {/* Business Profile Header Card */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24, borderBottom: '1px solid var(--border)', paddingBottom: 20 }}>
+                            <div style={{ width: 64, height: 64, borderRadius: 12, background: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary)', border: '1px solid var(--border)', boxShadow: 'var(--sh)' }}>
+                              <Building size={30} />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--t1)' }}>
+                                {company.company_name || '—'}
+                              </div>
+                              <div style={{ fontSize: '13px', color: 'var(--t3)', marginTop: 4 }}>
+                                Official Business Identity & Financial Profile
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                            {/* Identity & Tax Profile */}
+                            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: 18, background: '#fff', boxShadow: 'var(--sh)' }}>
+                              <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--t2)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Shield size={15} style={{ color: 'var(--primary)' }} /> Identity & Tax Info
+                              </h4>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                                <div>
+                                  <span style={{ fontSize: '11px', color: 'var(--t3)', fontWeight: 600, display: 'block', marginBottom: 4 }}>GSTIN</span>
+                                  <span className="badge badge-blue" style={{ fontSize: '12px', fontFamily: 'monospace', fontWeight: 600 }}>{company.gstin || '—'}</span>
+                                </div>
+                                <div>
+                                  <span style={{ fontSize: '11px', color: 'var(--t3)', fontWeight: 600, display: 'block', marginBottom: 4 }}>PAN Number</span>
+                                  <span className="badge badge-gray" style={{ fontSize: '12px', fontFamily: 'monospace', fontWeight: 600 }}>{company.pan_number || '—'}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Contact Details */}
+                            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: 18, background: '#fff', boxShadow: 'var(--sh)' }}>
+                              <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--t2)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <User size={15} style={{ color: 'var(--primary)' }} /> Contact & Location
+                              </h4>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                <div>
+                                  <span style={{ fontSize: '11px', color: 'var(--t3)', display: 'block' }}>Phone</span>
+                                  <span style={{ fontSize: '13.5px', color: 'var(--t1)', fontWeight: 600 }}>{company.phone || '—'}</span>
+                                </div>
+                                <div>
+                                  <span style={{ fontSize: '11px', color: 'var(--t3)', display: 'block' }}>Email Address</span>
+                                  <span style={{ fontSize: '13.5px', color: 'var(--t1)', fontWeight: 600 }}>{company.email || '—'}</span>
+                                </div>
+                                <div>
+                                  <span style={{ fontSize: '11px', color: 'var(--t3)', display: 'block' }}>Address Details</span>
+                                  <span style={{ fontSize: '13px', color: 'var(--t2)', lineHeight: 1.4, fontWeight: 500 }}>
+                                    {(() => {
+                                      const parts = [company.address, company.city, company.state].filter(Boolean)
+                                      const mainAddress = parts.join(', ')
+                                      return mainAddress
+                                        ? (mainAddress + (company.pincode ? ` - ${company.pincode}` : ''))
+                                        : (company.pincode || '—')
+                                    })()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Bank details */}
+                            <div style={{ gridColumn: 'span 2', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: 18, background: '#F8FAFC', boxShadow: 'var(--sh)' }}>
+                              <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--t2)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Lock size={15} style={{ color: 'var(--primary)' }} /> Bank Account Information
+                              </h4>
+                              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 16 }}>
+                                <div>
+                                  <span style={{ fontSize: '11px', color: 'var(--t3)', display: 'block', marginBottom: 2 }}>Bank Name</span>
+                                  <span style={{ fontSize: '13.5px', color: 'var(--t1)', fontWeight: 600 }}>{company.bank_name || '—'}</span>
+                                </div>
+                                <div>
+                                  <span style={{ fontSize: '11px', color: 'var(--t3)', display: 'block', marginBottom: 2 }}>Account Number</span>
+                                  <span style={{ fontSize: '13.5px', color: 'var(--t1)', fontFamily: 'monospace', fontWeight: 600 }}>{company.account_number || '—'}</span>
+                                </div>
+                                <div>
+                                  <span style={{ fontSize: '11px', color: 'var(--t3)', display: 'block', marginBottom: 2 }}>IFSC Code</span>
+                                  <span style={{ fontSize: '13.5px', color: 'var(--t1)', fontFamily: 'monospace', fontWeight: 600 }}>{company.ifsc_code || '—'}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ textAlign: 'center', padding: '20px', color: 'var(--t3)' }}>
+                          No company details loaded.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 2) USER PROFILE */}
+            {activeTab === 'user' && (
+              <div>
+                <div className="card-hdr" style={{ background: '#f8fafc' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Shield size={18} color="var(--primary)" />
+                    <span className="card-title" style={{ fontSize: '15px' }}>
+                      User Account Settings
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '24px' }}>
+                  {/* Avatar & Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24, borderBottom: '1px solid var(--border)', paddingBottom: 20 }}>
+                    <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, var(--primary), #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 24, fontWeight: 700, boxShadow: 'var(--sh)' }}>
+                      {user?.full_name ? user.full_name.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--t1)' }}>
+                        {user?.full_name || 'System User'}
+                      </div>
+                      <div style={{ fontSize: '13px', color: 'var(--t3)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        Username ID: <span style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--t2)' }}>{user?.username}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: 18, background: '#fff', boxShadow: 'var(--sh)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--t3)', fontWeight: 600, display: 'block', marginBottom: 4 }}>System Permission Role</span>
+                      <span className="badge badge-green" style={{ textTransform: 'uppercase', fontSize: '11.5px', fontWeight: 600 }}>{user?.role || '—'}</span>
+                    </div>
+                    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: 18, background: '#fff', boxShadow: 'var(--sh)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--t3)', fontWeight: 600, display: 'block', marginBottom: 4 }}>User ID Code</span>
+                      <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--t1)', fontFamily: 'monospace' }}>#{user?.user_id || 'N/A'}</span>
+                    </div>
+
+                    {/* Security Notice */}
                     <div
                       style={{
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        color: 'var(--t2)',
-                        marginBottom: '4px'
+                        gridColumn: 'span 2',
+                        background: 'var(--warning-bg)',
+                        padding: '16px 20px',
+                        borderRadius: 'var(--r-lg)',
+                        border: '1px solid #FEF3C7',
+                        color: '#B45309',
+                        display: 'flex',
+                        gap: '12px',
+                        alignItems: 'flex-start'
                       }}
                     >
-                      Admin Control Restriction Notice
-                    </div>
-                    <div style={{ fontSize: '11.5px', color: 'var(--t3)', lineHeight: 1.5 }}>
-                      Modifications to authorization roles, status parameters, or company bindings
-                      must be approved and applied by the Chief System Administrator to preserve audit records.
+                      <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+                      <div>
+                        <div
+                          style={{
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            marginBottom: '4px'
+                          }}
+                        >
+                          Admin Control Restriction Notice
+                        </div>
+                        <div style={{ fontSize: '12px', lineHeight: 1.5, opacity: 0.9 }}>
+                          Modifications to authorization roles, status parameters, or company bindings
+                          must be approved and applied by the Chief System Administrator to preserve audit records.
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* 3) CHANGE PASSWORD */}
-          {activeTab === 'password' && (
-            <div style={{ position: 'relative' }}>
-              {changePasswordMutation.isPending && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    background: 'rgba(255,255,255,0.7)',
-                    zIndex: 10,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <div className="spinner" />
-                </div>
-              )}
-
-              <div className="card-hdr" style={{ background: '#f8fafc' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <KeyRound size={18} color="var(--primary)" />
-                  <span className="card-title" style={{ fontSize: '15px' }}>
-                    Change Password Credentials
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ padding: '24px' }}>
-                <form onSubmit={handlePasswordSave} style={{ maxWidth: '420px' }}>
-                  <div className="fgrp">
-                    <label className="flabel">Current System Password</label>
-                    <input
-                      type="password"
-                      className={`finput ${passwordFieldErrors.old_password?.length ? 'err' : ''}`}
-                      required
-                      placeholder="Enter your current password"
-                      value={oldPassword}
-                      onChange={(e) => handlePasswordChange('old_password', e.target.value)}
-                    />
-                    {passwordFieldErrors.old_password?.map((errMsg, idx) => (
-                      <div key={idx} className="ferr">{errMsg}</div>
-                    ))}
-                  </div>
- 
-                  <div className="fgrp" style={{ marginTop: '18px' }}>
-                    <label className="flabel">New Secure Password</label>
-                    <input
-                      type="password"
-                      className={`finput ${passwordFieldErrors.new_password?.length ? 'err' : ''}`}
-                      required
-                      placeholder="At least 8 characters"
-                      value={newPassword}
-                      onChange={(e) => handlePasswordChange('new_password', e.target.value)}
-                    />
-                    {passwordFieldErrors.new_password?.map((errMsg, idx) => (
-                      <div key={idx} className="ferr">{errMsg}</div>
-                    ))}
-                  </div>
- 
-                  <div className="fgrp">
-                    <label className="flabel">Confirm New Password</label>
-                    <input
-                      type="password"
-                      className={`finput ${passwordFieldErrors.confirm_password?.length ? 'err' : ''}`}
-                      required
-                      placeholder="Re-enter new password"
-                      value={confirmPassword}
-                      onChange={(e) => handlePasswordChange('confirm_password', e.target.value)}
-                    />
-                    {passwordFieldErrors.confirm_password?.map((errMsg, idx) => (
-                      <div key={idx} className="ferr">{errMsg}</div>
-                    ))}
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    style={{ marginTop: '16px', width: '100%', justifyContent: 'center' }}
+            {/* 3) CHANGE PASSWORD */}
+            {activeTab === 'password' && (
+              <div style={{ position: 'relative' }}>
+                {changePasswordMutation.isPending && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      background: 'rgba(255,255,255,0.7)',
+                      zIndex: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
                   >
-                    <Save size={15} /> Update Credentials
-                  </button>
-                </form>
+                    <div className="spinner" />
+                  </div>
+                )}
+
+                <div className="card-hdr" style={{ background: '#f8fafc' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <KeyRound size={18} color="var(--primary)" />
+                    <span className="card-title" style={{ fontSize: '15px' }}>
+                      Change Password Credentials
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '24px' }}>
+                  <form onSubmit={handlePasswordSave} style={{ maxWidth: '440px' }}>
+                    <div className="fgrp">
+                      <label className="flabel">Current System Password</label>
+                      <input
+                        type="password"
+                        className={`finput ${passwordFieldErrors.old_password?.length ? 'err' : ''}`}
+                        required
+                        placeholder="Enter your current password"
+                        value={oldPassword}
+                        onChange={(e) => handlePasswordChange('old_password', e.target.value)}
+                      />
+                      {passwordFieldErrors.old_password?.map((errMsg, idx) => (
+                        <div key={idx} className="ferr">{errMsg}</div>
+                      ))}
+                    </div>
+   
+                    <div className="fgrp" style={{ marginTop: '18px' }}>
+                      <label className="flabel">New Secure Password</label>
+                      <input
+                        type="password"
+                        className={`finput ${passwordFieldErrors.new_password?.length ? 'err' : ''}`}
+                        required
+                        placeholder="At least 8 characters"
+                        value={newPassword}
+                        onChange={(e) => handlePasswordChange('new_password', e.target.value)}
+                      />
+                      {passwordFieldErrors.new_password?.map((errMsg, idx) => (
+                        <div key={idx} className="ferr">{errMsg}</div>
+                      ))}
+                    </div>
+   
+                    <div className="fgrp">
+                      <label className="flabel">Confirm New Password</label>
+                      <input
+                        type="password"
+                        className={`finput ${passwordFieldErrors.confirm_password?.length ? 'err' : ''}`}
+                        required
+                        placeholder="Re-enter new password"
+                        value={confirmPassword}
+                        onChange={(e) => handlePasswordChange('confirm_password', e.target.value)}
+                      />
+                      {passwordFieldErrors.confirm_password?.map((errMsg, idx) => (
+                        <div key={idx} className="ferr">{errMsg}</div>
+                      ))}
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      style={{ marginTop: '20px', width: '100%', justifyContent: 'center', padding: '10px 16px' }}
+                    >
+                      <Save size={15} /> Update Credentials
+                    </button>
+                  </form>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
         )}
       </div>
     </div>

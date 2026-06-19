@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, Eye, Edit, X, AlertCircle, FileText, Trash2, CreditCard, Printer, Download } from 'lucide-react'
+import { Search, Plus, Eye, Edit, X, AlertCircle, FileText, Trash2, CreditCard, Printer, Download, Calendar } from 'lucide-react'
 import client from '../api/client'
 import TaxInvoicePrint from './TaxInvoicePrint'
 import RetailInvoicePrint from './RetailInvoicePrint1'
@@ -84,7 +84,17 @@ const fmt = (d: string) => {
   if (!d) return ''
   const parsed = new Date(d)
   if (isNaN(parsed.getTime())) return d
-  return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const day = String(parsed.getDate()).padStart(2, '0')
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const year = parsed.getFullYear()
+  return `${day}/${month}/${year}`
+}
+
+const formatDateToDDMMYYYY = (d: string) => {
+  if (!d) return ''
+  const parts = d.split('-')
+  if (parts.length !== 3) return d
+  return `${parts[2]}/${parts[1]}/${parts[0]}`
 }
 
 const statusBadge = (s: string) => {
@@ -198,6 +208,8 @@ export default function Invoices() {
   const [cfieldErrors, setCfieldErrors] = useState<Record<string, string[]>>({})
   const [editInvoiceId, setEditInvoiceId] = useState<number | null>(null)
   const [editInvoiceNumber, setEditInvoiceNumber] = useState<string>('')
+  const [showConfirmSubmit, setShowConfirmSubmit] = useState(false)
+  const [submitPayload, setSubmitPayload] = useState<any>(null)
 
   const [fyFilter, setFyFilter] = useState(getCurrentFinancialYear())
   const [monthFilter, setMonthFilter] = useState<number>(new Date().getMonth() + 1)
@@ -475,11 +487,19 @@ export default function Invoices() {
         hsn_code: it.hsn_code || null
       }))
     }
+    setSubmitPayload(payload)
+    setShowConfirmSubmit(true)
+  }
+
+  const handleConfirmSubmit = () => {
+    if (!submitPayload) return
     if (editInvoiceId) {
-      updateInvoiceMutation.mutate({ invoiceId: editInvoiceId, payload })
+      updateInvoiceMutation.mutate({ invoiceId: editInvoiceId, payload: submitPayload })
     } else {
-      createInvoiceMutation.mutate(payload)
+      createInvoiceMutation.mutate(submitPayload)
     }
+    setShowConfirmSubmit(false)
+    setSubmitPayload(null)
   }
 
   /* Open payment dialog */
@@ -748,13 +768,13 @@ export default function Invoices() {
       {/* ── Create Invoice Modal ── */}
       {showCreate && (
         <div className="overlay">
-          <div className="modal" style={{ width: 860, maxWidth: '97vw' }}>
+          <div className="modal" style={{ width: 960, maxWidth: '97vw' }}>
             <div className="modal-hdr">
               <span className="modal-title">
                 {editInvoiceId ? `Edit Invoice - ${editInvoiceNumber}` : 'Create New Invoice'}
               </span>
-              <button className="tb-btn" onClick={() => setShowCreate(false)}>
-                <X size={15} />
+              <button className="modal-close-btn" onClick={() => setShowCreate(false)}>
+                <X size={18} />
               </button>
             </div>
             <form onSubmit={handleCreate}>
@@ -802,13 +822,35 @@ export default function Invoices() {
                   </div>
                   <div className="fgrp">
                     <label className="flabel">Invoice Date *</label>
-                    <input
-                      className={`finput ${cfieldErrors.invoice_date?.length ? 'err' : ''}`}
-                      type="date"
-                      required
-                      value={cform.invoice_date}
-                      onChange={(e) => handleCformChange('invoice_date', e.target.value)}
-                    />
+                    <div style={{ position: 'relative' }}>
+                      <div
+                        className={`finput ${cfieldErrors.invoice_date?.length ? 'err' : ''}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          pointerEvents: 'none'
+                        }}
+                      >
+                        <span>{cform.invoice_date ? formatDateToDDMMYYYY(cform.invoice_date) : 'dd/mm/yyyy'}</span>
+                        <Calendar size={15} style={{ color: 'var(--t3)' }} />
+                      </div>
+                      <input
+                        type="date"
+                        required
+                        value={cform.invoice_date}
+                        onChange={(e) => handleCformChange('invoice_date', e.target.value)}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          opacity: 0,
+                          cursor: 'pointer'
+                        }}
+                      />
+                    </div>
                     {cfieldErrors.invoice_date?.map((errMsg, idx) => (
                       <div key={idx} className="ferr">{errMsg}</div>
                     ))}
@@ -932,6 +974,20 @@ export default function Invoices() {
                               width: 120
                             }}
                           >
+                            Amt (Excl. Tax)
+                          </th>
+                          <th
+                            style={{
+                              padding: '7px 10px',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: 'var(--t3)',
+                              textAlign: 'right',
+                              letterSpacing: '.5px',
+                              textTransform: 'uppercase',
+                              width: 120
+                            }}
+                          >
                             Line Total
                           </th>
                           <th style={{ width: 36 }} />
@@ -1011,6 +1067,18 @@ export default function Invoices() {
                                   value={cform.invoice_type === 'TAX' ? '18%' : '0%'}
                                   readOnly
                                 />
+                              </td>
+                              <td
+                                style={{
+                                  padding: '6px 8px',
+                                  textAlign: 'right',
+                                  fontWeight: 500,
+                                  fontSize: 13,
+                                  color: 'var(--t2)',
+                                  fontVariantNumeric: 'tabular-nums'
+                                }}
+                              >
+                                {inr(c.taxable)}
                               </td>
                               <td
                                 style={{
@@ -1150,45 +1218,44 @@ export default function Invoices() {
       {showDetail && detailInv && (
         <div className="overlay">
           <div className="modal" style={{ width: 720, maxWidth: '97vw' }}>
-            <div className="modal-hdr" style={{ background: '#0B1426' }}>
+            <div className="modal-hdr" style={{ background: '#F8FAFC', borderBottom: '1px solid var(--border)' }}>
               <div>
-                <span className="modal-title" style={{ color: '#fff', fontSize: 13 }}>
+                <span className="modal-title" style={{ color: 'var(--t1)', fontSize: 14, fontWeight: 700 }}>
                   Invoice Detail
                 </span>
-                <div style={{ color: '#4A6080', fontSize: 12, marginTop: 2 }}>
-                  {detailInv.invoice_number}
+                <div style={{ color: 'var(--t3)', fontSize: 12, marginTop: 2 }}>
+                  Invoice #{detailInv.invoice_number}
                 </div>
               </div>
               <div className="row gap-2">
                 {detailInv.payment_status !== 'PAID' && (
                   <button
-                    className="btn btn-primary btn-sm row gap-1"
+                    className="btn btn-primary row gap-1"
                     onClick={openPay}
                     disabled={detailLoading}
                   >
-                    <CreditCard size={13} /> Record Payment
+                    <CreditCard size={15} /> Record Payment
                   </button>
                 )}
                 <button
-                  className="btn btn-outline btn-sm row gap-1"
+                  className="btn btn-outline row gap-1"
                   onClick={() => {
                     setShowDetail(false)
                     openEdit(detailInv)
                   }}
                   disabled={detailLoading}
-                  style={{ color: '#fff', borderColor: '#4A6080' }}
+                  style={{ color: 'var(--primary)', borderColor: 'var(--primary)' }}
                 >
-                  <Edit size={13} /> Edit
+                  <Edit size={15} /> Edit
                 </button>
                 <button
-                  className="tb-btn"
+                  className="modal-close-btn"
                   onClick={() => {
                     setShowDetail(false)
                     setActiveInvoiceId(null)
                   }}
-                  style={{ color: '#8898AA' }}
                 >
-                  <X size={15} />
+                  <X size={18} />
                 </button>
               </div>
             </div>
@@ -1213,35 +1280,35 @@ export default function Invoices() {
                       style={{
                         background: '#F8FAFC',
                         borderRadius: 8,
-                        padding: '12px 14px',
+                        padding: '14px 16px',
                         border: '1px solid var(--border)'
                       }}
                     >
                       <div
-                        className="fs12 t3 fw6"
+                        className="fs11 t3 fw7"
                         style={{
-                          marginBottom: 6,
+                          marginBottom: 8,
                           textTransform: 'uppercase',
-                          letterSpacing: '.5px'
+                          letterSpacing: '.8px'
                         }}
                       >
                         Bill To
                       </div>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{detailInv.customer_name}</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--t1)' }}>{detailInv.customer_name}</div>
                       {detailInv.contact_person && (
-                        <div className="fs12 t2" style={{ marginTop: 2 }}>
-                          {detailInv.contact_person}
+                        <div className="fs12 t2" style={{ marginTop: 4, fontWeight: 500 }}>
+                          Attn: {detailInv.contact_person}
                         </div>
                       )}
                       {detailInv.customer_address && (
-                        <div className="fs12 t3" style={{ marginTop: 2 }}>
+                        <div className="fs12 t2" style={{ marginTop: 4, lineHeight: 1.4 }}>
                           {detailInv.customer_address}
                         </div>
                       )}
                       {detailInv.invoice_type === 'TAX' && detailInv.customer_gstin && (
-                        <div className="fs12 t2" style={{ marginTop: 4 }}>
+                        <div className="fs12 t2" style={{ marginTop: 8, background: 'var(--primary-light)', padding: '4px 8px', borderRadius: 4, display: 'inline-block' }}>
                           GSTIN:{' '}
-                          <span style={{ fontFamily: 'monospace' }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>
                             {detailInv.customer_gstin}
                           </span>
                         </div>
@@ -1251,43 +1318,43 @@ export default function Invoices() {
                       style={{
                         background: '#F8FAFC',
                         borderRadius: 8,
-                        padding: '12px 14px',
+                        padding: '14px 16px',
                         border: '1px solid var(--border)'
                       }}
                     >
                       <div
-                        className="fs12 t3 fw6"
+                        className="fs11 t3 fw7"
                         style={{
                           marginBottom: 8,
                           textTransform: 'uppercase',
-                          letterSpacing: '.5px'
+                          letterSpacing: '.8px'
                         }}
                       >
                         Invoice Details
                       </div>
-                      <div className="row jc-sb" style={{ marginBottom: 5 }}>
+                      <div className="row jc-sb" style={{ padding: '4px 0', borderBottom: '1px dashed var(--border)' }}>
                         <span className="t2 fs12">Invoice #</span>
                         <span
-                          className="fw6 fs12"
+                          className="fw7 fs12"
                           style={{ fontFamily: 'monospace', color: 'var(--primary)' }}
                         >
                           {detailInv.invoice_number}
                         </span>
                       </div>
-                      <div className="row jc-sb" style={{ marginBottom: 5 }}>
+                      <div className="row jc-sb" style={{ padding: '5px 0', borderBottom: '1px dashed var(--border)' }}>
                         <span className="t2 fs12">Date</span>
-                        <span className="fw6 fs12">{fmt(detailInv.invoice_date)}</span>
+                        <span className="fw6 fs12" style={{ color: 'var(--t1)' }}>{fmt(detailInv.invoice_date)}</span>
                       </div>
-                      <div className="row jc-sb" style={{ marginBottom: 5 }}>
+                      <div className="row jc-sb" style={{ padding: '5px 0', borderBottom: '1px dashed var(--border)' }}>
                         <span className="t2 fs12">Type</span>
                         <span
                           className={`badge ${detailInv.invoice_type === 'TAX' ? 'badge-blue' : 'badge-yellow'}`}
-                          style={{ padding: '2px 8px' }}
+                          style={{ padding: '1px 8px', fontSize: 10.5 }}
                         >
                           {detailInv.invoice_type}
                         </span>
                       </div>
-                      <div className="row jc-sb">
+                      <div className="row jc-sb" style={{ padding: '5px 0 0' }}>
                         <span className="t2 fs12">Status</span>
                         {statusBadge(detailInv.payment_status)}
                       </div>
@@ -1308,14 +1375,14 @@ export default function Invoices() {
                         <thead>
                           <tr
                             style={{
-                              background: '#F7FAFD',
-                              borderBottom: '1px solid var(--border)'
+                              background: '#F8FAFC',
+                              borderBottom: '2px solid var(--border)'
                             }}
                           >
                             <th
                               style={{
-                                padding: '8px 12px',
-                                fontSize: 11,
+                                padding: '10px 12px',
+                                fontSize: 10.5,
                                 fontWeight: 700,
                                 color: 'var(--t3)',
                                 textAlign: 'left',
@@ -1327,65 +1394,70 @@ export default function Invoices() {
                             </th>
                             <th
                               style={{
-                                padding: '8px 12px',
-                                fontSize: 11,
+                                padding: '10px 12px',
+                                fontSize: 10.5,
                                 fontWeight: 700,
                                 color: 'var(--t3)',
                                 textAlign: 'right',
                                 letterSpacing: '.5px',
-                                textTransform: 'uppercase'
+                                textTransform: 'uppercase',
+                                width: 50
                               }}
                             >
                               Qty
                             </th>
                             <th
                               style={{
-                                padding: '8px 12px',
-                                fontSize: 11,
+                                padding: '10px 12px',
+                                fontSize: 10.5,
                                 fontWeight: 700,
                                 color: 'var(--t3)',
                                 textAlign: 'right',
                                 letterSpacing: '.5px',
-                                textTransform: 'uppercase'
+                                textTransform: 'uppercase',
+                                width: 100
                               }}
                             >
                               Rate
                             </th>
                             <th
                               style={{
-                                padding: '8px 12px',
-                                fontSize: 11,
+                                padding: '10px 12px',
+                                fontSize: 10.5,
                                 fontWeight: 700,
                                 color: 'var(--t3)',
                                 textAlign: 'right',
                                 letterSpacing: '.5px',
-                                textTransform: 'uppercase'
+                                textTransform: 'uppercase',
+                                width: 110
                               }}
                             >
                               Taxable
                             </th>
                             <th
                               style={{
-                                padding: '8px 12px',
-                                fontSize: 11,
+                                padding: '10px 12px',
+                                fontSize: 10.5,
                                 fontWeight: 700,
                                 color: 'var(--t3)',
                                 textAlign: 'right',
                                 letterSpacing: '.5px',
-                                textTransform: 'uppercase'
+                                textTransform: 'uppercase',
+                                width: 90
                               }}
                             >
                               GST
                             </th>
                             <th
                               style={{
-                                padding: '8px 12px',
-                                fontSize: 11,
+                                padding: '10px 12px',
+                                fontSize: 10.5,
                                 fontWeight: 700,
                                 color: 'var(--t3)',
                                 textAlign: 'right',
                                 letterSpacing: '.5px',
-                                textTransform: 'uppercase'
+                                textTransform: 'uppercase',
+                                width: 120
                               }}
                             >
                               Total
@@ -1394,8 +1466,8 @@ export default function Invoices() {
                         </thead>
                         <tbody>
                           {detailInv.items.map((it, i) => (
-                            <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td style={{ padding: '9px 12px', fontWeight: 500 }}>
+                            <tr key={i} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? '#fff' : '#F8FAFC' }}>
+                              <td style={{ padding: '10px 12px', fontWeight: 500, color: 'var(--t1)' }}>
                                 {it.product_name || `Product #${it.product_id}`}
                                 {detailInv.invoice_type === 'TAX' && it.hsn_code && (
                                   <span className="fs12 t3" style={{ marginLeft: 6 }}>
@@ -1405,7 +1477,7 @@ export default function Invoices() {
                               </td>
                               <td
                                 style={{
-                                  padding: '9px 12px',
+                                  padding: '10px 12px',
                                   textAlign: 'right',
                                   fontVariantNumeric: 'tabular-nums'
                                 }}
@@ -1414,7 +1486,7 @@ export default function Invoices() {
                               </td>
                               <td
                                 style={{
-                                  padding: '9px 12px',
+                                  padding: '10px 12px',
                                   textAlign: 'right',
                                   fontVariantNumeric: 'tabular-nums'
                                 }}
@@ -1423,7 +1495,7 @@ export default function Invoices() {
                               </td>
                               <td
                                 style={{
-                                  padding: '9px 12px',
+                                  padding: '10px 12px',
                                   textAlign: 'right',
                                   fontVariantNumeric: 'tabular-nums'
                                 }}
@@ -1432,7 +1504,7 @@ export default function Invoices() {
                               </td>
                               <td
                                 style={{
-                                  padding: '9px 12px',
+                                  padding: '10px 12px',
                                   textAlign: 'right',
                                   fontSize: 12,
                                   color: 'var(--t2)',
@@ -1447,10 +1519,11 @@ export default function Invoices() {
                               </td>
                               <td
                                 style={{
-                                  padding: '9px 12px',
+                                  padding: '10px 12px',
                                   textAlign: 'right',
                                   fontWeight: 600,
-                                  fontVariantNumeric: 'tabular-nums'
+                                  fontVariantNumeric: 'tabular-nums',
+                                  color: 'var(--t1)'
                                 }}
                               >
                                 {inr(it.total_amount)}
@@ -1466,7 +1539,7 @@ export default function Invoices() {
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <div
                       style={{
-                        width: 260,
+                        width: 280,
                         background: '#F8FAFC',
                         border: '1px solid var(--border)',
                         borderRadius: 8,
@@ -1484,48 +1557,58 @@ export default function Invoices() {
                           <div
                             key={String(label)}
                             className="row jc-sb"
-                            style={{ marginBottom: 5 }}
+                            style={{ padding: '4px 0', color: 'var(--t2)' }}
                           >
-                            <span className="t2">{label}</span>
-                            <span className="fw6">{inr(val as any)}</span>
+                            <span>{label}</span>
+                            <span className="fw6" style={{ fontVariantNumeric: 'tabular-nums' }}>{inr(val as any)}</span>
                           </div>
                         ) : null
                       )}
                       {Number(detailInv.discount_amount) > 0 && (
                         <div
                           className="row jc-sb"
-                          style={{ marginBottom: 5, color: 'var(--success)' }}
+                          style={{ padding: '4px 0', color: 'var(--success)' }}
                         >
                           <span>Discount</span>
-                          <span>− {inr(detailInv.discount_amount)}</span>
+                          <span className="fw6" style={{ fontVariantNumeric: 'tabular-nums' }}>− {inr(detailInv.discount_amount)}</span>
                         </div>
                       )}
                       <div
                         style={{
-                          borderTop: '2px solid var(--border)',
-                          paddingTop: 8,
-                          marginTop: 4
+                          borderTop: '1.5px solid var(--border)',
+                          padding: '6px 0',
+                          marginTop: 6
                         }}
                         className="row jc-sb"
                       >
-                        <span style={{ fontWeight: 700 }}>Grand Total</span>
-                        <span style={{ fontWeight: 800, fontSize: 16 }}>
+                        <span style={{ fontWeight: 700, color: 'var(--t1)' }}>Grand Total</span>
+                        <span className="fw8" style={{ fontSize: 15, fontVariantNumeric: 'tabular-nums' }}>
                           {inr(detailInv.grand_total)}
                         </span>
                       </div>
-                      <div className="row jc-sb" style={{ marginTop: 6 }}>
+                      <div className="row jc-sb" style={{ padding: '4px 0', borderTop: '1px dashed var(--border)' }}>
                         <span className="t2">Amount Paid</span>
-                        <span className="fw6" style={{ color: 'var(--success)' }}>
+                        <span className="fw6" style={{ color: 'var(--success)', fontVariantNumeric: 'tabular-nums' }}>
                           {inr(Number(detailInv.grand_total) - Number(detailInv.due_amount))}
                         </span>
                       </div>
-                      <div className="row jc-sb" style={{ marginTop: 4 }}>
-                        <span style={{ fontWeight: 700 }}>Balance Due</span>
+                      <div
+                        className="row jc-sb"
+                        style={{
+                          padding: '6px 8px',
+                          marginTop: 6,
+                          borderRadius: 6,
+                          background: Number(detailInv.due_amount) > 0 ? 'var(--danger-bg)' : 'var(--success-bg)',
+                          border: Number(detailInv.due_amount) > 0 ? '1px solid #fee2e2' : '1px solid #dcfce7'
+                        }}
+                      >
+                        <span style={{ fontWeight: 700, color: Number(detailInv.due_amount) > 0 ? 'var(--danger)' : 'var(--success)' }}>Balance Due</span>
                         <span
                           style={{
                             fontWeight: 800,
-                            color:
-                              Number(detailInv.due_amount) > 0 ? 'var(--danger)' : 'var(--success)'
+                            fontSize: 14,
+                            fontVariantNumeric: 'tabular-nums',
+                            color: Number(detailInv.due_amount) > 0 ? 'var(--danger)' : 'var(--success)'
                           }}
                         >
                           {inr(detailInv.due_amount)}
@@ -1557,8 +1640,8 @@ export default function Invoices() {
           <div className="modal modal-sm" style={{ width: 440 }}>
             <div className="modal-hdr">
               <span className="modal-title">Record Payment</span>
-              <button className="tb-btn" onClick={() => setShowPay(false)}>
-                <X size={15} />
+              <button className="modal-close-btn" onClick={() => setShowPay(false)}>
+                <X size={18} />
               </button>
             </div>
             <form onSubmit={handlePay}>
@@ -1612,12 +1695,35 @@ export default function Invoices() {
                   </div>
                   <div className="fgrp">
                     <label className="flabel">Payment Date *</label>
-                    <input
-                      className={`finput ${payFieldErrors.payment_date?.length ? 'err' : ''}`}
-                      type="date"
-                      value={payForm.payment_date}
-                      onChange={(e) => handlePayFormChange('payment_date', e.target.value)}
-                    />
+                    <div style={{ position: 'relative' }}>
+                      <div
+                        className={`finput ${payFieldErrors.payment_date?.length ? 'err' : ''}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          pointerEvents: 'none'
+                        }}
+                      >
+                        <span>{payForm.payment_date ? formatDateToDDMMYYYY(payForm.payment_date) : 'dd/mm/yyyy'}</span>
+                        <Calendar size={15} style={{ color: 'var(--t3)' }} />
+                      </div>
+                      <input
+                        type="date"
+                        required
+                        value={payForm.payment_date}
+                        onChange={(e) => handlePayFormChange('payment_date', e.target.value)}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          opacity: 0,
+                          cursor: 'pointer'
+                        }}
+                      />
+                    </div>
                     {payFieldErrors.payment_date?.map((errMsg, idx) => (
                       <div key={idx} className="ferr">{errMsg}</div>
                     ))}
@@ -1677,6 +1783,184 @@ export default function Invoices() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm Submit Modal ── */}
+      {showConfirmSubmit && submitPayload && (
+        <div className="overlay" style={{ zIndex: 1000 }}>
+          <div className="modal" style={{ width: 720, maxWidth: '97vw' }}>
+            <div className="modal-hdr" style={{ background: '#0F172A' }}>
+              <div>
+                <span className="modal-title" style={{ color: '#fff' }}>
+                  Review Invoice Details
+                </span>
+                <div style={{ color: '#64748B', fontSize: 12, marginTop: 2 }}>
+                  Please review the invoice details before saving
+                </div>
+              </div>
+              <button
+                className="modal-close-btn dark-bg"
+                onClick={() => setShowConfirmSubmit(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="modal-body" style={{ padding: 20 }}>
+              {/* Meta info */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: 16,
+                  marginBottom: 16
+                }}
+              >
+                <div
+                  style={{
+                    background: '#F8FAFC',
+                    borderRadius: 8,
+                    padding: '12px 14px',
+                    border: '1px solid var(--border)'
+                  }}
+                >
+                  <div className="fs12 t3 fw6" style={{ marginBottom: 4 }}>CUSTOMER</div>
+                  <div style={{ fontWeight: 700 }}>
+                    {customers.find((c) => String(c.customer_id) === String(submitPayload.customer_id))?.customer_name || ''}
+                  </div>
+                  {(() => {
+                    const cust = customers.find((c) => String(c.customer_id) === String(submitPayload.customer_id))
+                    return cust?.gstin ? <div className="fs12 t2" style={{ marginTop: 2 }}>GSTIN: {cust.gstin}</div> : null
+                  })()}
+                </div>
+                
+                <div
+                  style={{
+                    background: '#F8FAFC',
+                    borderRadius: 8,
+                    padding: '12px 14px',
+                    border: '1px solid var(--border)'
+                  }}
+                >
+                  <div className="fs12 t3 fw6" style={{ marginBottom: 4 }}>METADATA</div>
+                  <div className="row jc-sb" style={{ marginBottom: 2 }}>
+                    <span className="t2 fs12">Invoice Type</span>
+                    <span className={`badge ${submitPayload.invoice_type === 'TAX' ? 'badge-blue' : 'badge-yellow'}`} style={{ padding: '2px 8px' }}>
+                      {submitPayload.invoice_type}
+                    </span>
+                  </div>
+                  <div className="row jc-sb">
+                    <span className="t2 fs12">Invoice Date</span>
+                    <span className="fw6 fs12">{formatDateToDDMMYYYY(submitPayload.invoice_date)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                  marginBottom: 16
+                }}
+              >
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#F8FAFC', borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '6px 10px', fontSize: 11, fontWeight: 700, color: 'var(--t3)', textAlign: 'left' }}>Product</th>
+                      <th style={{ padding: '6px 10px', fontSize: 11, fontWeight: 700, color: 'var(--t3)', textAlign: 'right', width: 60 }}>Qty</th>
+                      <th style={{ padding: '6px 10px', fontSize: 11, fontWeight: 700, color: 'var(--t3)', textAlign: 'right', width: 100 }}>Rate</th>
+                      <th style={{ padding: '6px 10px', fontSize: 11, fontWeight: 700, color: 'var(--t3)', textAlign: 'right', width: 110 }}>Excl. Tax</th>
+                      <th style={{ padding: '6px 10px', fontSize: 11, fontWeight: 700, color: 'var(--t3)', textAlign: 'right', width: 110 }}>Incl. Tax</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((it, idx) => {
+                      const c = calcLine(it)
+                      return (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '6px 10px', fontSize: 12, fontWeight: 500 }}>{it.product_name}</td>
+                          <td style={{ padding: '6px 10px', fontSize: 12, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtVal(it.quantity)}</td>
+                          <td style={{ padding: '6px 10px', fontSize: 12, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{inr(it.unit_price)}</td>
+                          <td style={{ padding: '6px 10px', fontSize: 12, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{inr(c.taxable)}</td>
+                          <td style={{ padding: '6px 10px', fontSize: 12, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{inr(c.total)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Totals Box */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div
+                  style={{
+                    width: 250,
+                    background: '#F8FAFC',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    padding: '12px 14px',
+                    fontSize: 13
+                  }}
+                >
+                  <div className="row jc-sb" style={{ marginBottom: 4 }}>
+                    <span className="t2">Subtotal</span>
+                    <span className="fw6">{inr(totals.subtotal)}</span>
+                  </div>
+                  {submitPayload.invoice_type === 'TAX' && (
+                    <>
+                      <div className="row jc-sb" style={{ marginBottom: 4 }}>
+                        <span className="t2">{cgstLabel}</span>
+                        <span className="fw6">{inr(totals.cgst)}</span>
+                      </div>
+                      <div className="row jc-sb" style={{ marginBottom: 4 }}>
+                        <span className="t2">{sgstLabel}</span>
+                        <span className="fw6">{inr(totals.sgst)}</span>
+                      </div>
+                    </>
+                  )}
+                  {disc > 0 && (
+                    <div className="row jc-sb" style={{ marginBottom: 4, color: 'var(--success)' }}>
+                      <span className="t2">Discount</span>
+                      <span className="fw6">-{inr(disc)}</span>
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      borderTop: '1px solid var(--border)',
+                      marginTop: 6,
+                      paddingTop: 6
+                    }}
+                    className="row jc-sb"
+                  >
+                    <span style={{ fontWeight: 700 }}>Grand Total</span>
+                    <span style={{ fontWeight: 800, fontSize: 15 }}>{inr(grandTotal)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="modal-ftr">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setShowConfirmSubmit(false)}
+                disabled={cformLoading}
+              >
+                Back to Edit
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConfirmSubmit}
+                disabled={cformLoading}
+              >
+                {cformLoading ? 'Submitting...' : 'Confirm & Save'}
+              </button>
+            </div>
           </div>
         </div>
       )}

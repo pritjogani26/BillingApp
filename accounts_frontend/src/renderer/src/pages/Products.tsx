@@ -525,8 +525,8 @@ export default function Products() {
           <div className="modal">
             <div className="modal-hdr">
               <span className="modal-title">New Product / Service</span>
-              <button className="tb-btn" onClick={() => setShowAddModal(false)}>
-                <X size={15} />
+              <button className="modal-close-btn" onClick={() => setShowAddModal(false)}>
+                <X size={18} />
               </button>
             </div>
             <form onSubmit={handleCreate}>
@@ -554,8 +554,8 @@ export default function Products() {
           <div className="modal">
             <div className="modal-hdr">
               <span className="modal-title">Edit Product</span>
-              <button className="tb-btn" onClick={() => setShowEditModal(false)}>
-                <X size={15} />
+              <button className="modal-close-btn" onClick={() => setShowEditModal(false)}>
+                <X size={18} />
               </button>
             </div>
             <form onSubmit={handleUpdate}>

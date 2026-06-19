@@ -2,6 +2,9 @@ appId: com.electron.app
 productName: accounts-frontend
 directories:
   buildResources: build
+extraResources:
+  - from: "../accounts_backend/dist/server.exe"
+    to: "server.exe"
 files:
   - '!**/.vscode/*'
   - '!src/*'

@@ -1,8 +1,37 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { writeFile, unlink } from 'fs'
+import { spawn, ChildProcess } from 'child_process'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+
+// ── Backend Process Management ────────────────────────────────────────────────
+let backendProcess: ChildProcess | null = null
+
+function startBackend(): void {
+  // Path to server.exe (placed in resources/ folder during build)
+  const backendPath = app.isPackaged
+    ? join(process.resourcesPath, 'server.exe')
+    : join(__dirname, '../../../accounts_backend/dist/server.exe')
+
+  console.log('Spawning backend at:', backendPath)
+
+  backendProcess = spawn(backendPath, [], {
+    detached: false,
+    stdio: 'ignore'
+  })
+
+  backendProcess.on('error', (err) => {
+    console.error('Backend failed to start:', err)
+  })
+}
+
+function stopBackend(): void {
+  if (backendProcess) {
+    backendProcess.kill()
+    backendProcess = null
+  }
+}
 
 // ── Keep a reference so IPC handlers can access it ──────────────────────────
 let mainWindow: BrowserWindow | null = null
@@ -66,11 +95,22 @@ app.whenReady().then(() => {
   })
 
   registerIpcHandlers()   // ← register ONCE here, not inside createWindow()
-  createWindow()
+
+  // Start backend server
+  startBackend()
+
+  // Wait 2 seconds for Django to start, then open window
+  setTimeout(() => {
+    createWindow()
+  }, 2000)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  stopBackend()
 })
 
 app.on('window-all-closed', () => {
