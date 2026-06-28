@@ -1,5 +1,12 @@
 @echo off
 echo ===================================================
+echo 0. Terminating running processes to prevent file locks...
+echo ===================================================
+taskkill /f /im accounts-frontend.exe 2>nul
+taskkill /f /im server.exe 2>nul
+echo.
+
+echo ===================================================
 echo 1. Building Django Backend with PyInstaller...
 echo ===================================================
 cd accounts_backend
@@ -8,7 +15,7 @@ REM Activate virtual environment
 call ..\venv\Scripts\activate
 
 REM Run PyInstaller to bundle server.py
-pyinstaller --onefile --noconsole ^
+pyinstaller --onefile ^
   --add-data "accounts/templates;accounts/templates" ^
   --add-data "accounts/static;accounts/static" ^
   --hidden-import=django.db.backends.postgresql ^
@@ -42,6 +49,7 @@ call npm run build:win
 
 if %ERRORLEVEL% neq 0 (
   echo ❌ Frontend build failed!
+  pause
   exit /b %ERRORLEVEL%
 )
 

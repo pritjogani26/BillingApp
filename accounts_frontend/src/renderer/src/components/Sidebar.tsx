@@ -43,8 +43,18 @@ export default function Sidebar() {
     .toUpperCase()
 
   const handleLogout = () => {
+    // Blur the button before showing the confirm dialog to clear active focus
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
+
     if (window.confirm('Are you sure you want to log out?')) {
-      logout()
+      // Defer the state change / unmounting until the next tick.
+      // This lets the native confirm dialog fully close and allows
+      // the Electron window to recover focus before unmounting.
+      setTimeout(() => {
+        logout()
+      }, 50)
     }
   }
 

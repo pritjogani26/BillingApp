@@ -1,614 +1,600 @@
-import React, { useState, useEffect, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   Database,
-  Cloud,
-  Folder,
-  RefreshCw,
-  Trash2,
   CheckCircle2,
   AlertCircle,
   AlertTriangle,
-  UploadCloud,
-  HelpCircle,
-  FileText
+  Folder,
+  Copy,
+  Info,
+  ShieldCheck,
+  Server,
+  Upload
 } from 'lucide-react'
+import client from '../api/client'
+import { useAuth } from '../context/AuthContext'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface BackupFile {
+interface BackupResult {
+  filePath: string
   filename: string
-  size: number
-  size_readable: string
-  created_at: string
+  sizeReadable: string
+  timestamp: string
 }
-
-interface DriveStatusResponse {
-  configured: boolean
-  folder_id?: string
-  service_account_email?: string
-}
-
-interface CreateBackupResponse {
-  success: boolean
-  filename: string
-  size_readable: string
-  created_at: string
-  drive_status: string
-  drive_link?: string
-  error?: string
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
-
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('token')
-  const res = await fetch(`${API}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options?.headers ?? {})
-    }
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`)
-  return data as T
-}
-
-function driveStatusLabel(status: string): { text: string; color: string; icon?: React.ReactNode } {
-  if (status === 'uploaded') {
-    return {
-      text: 'Uploaded to Drive',
-      color: 'var(--success)',
-      icon: <CheckCircle2 size={13} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-    }
-  }
-  if (status === 'not_configured') {
-    return { text: 'Drive not configured', color: 'var(--t3)', icon: null }
-  }
-  if (status === 'libraries_missing') {
-    return {
-      text: 'Drive libraries missing',
-      color: 'var(--warning)',
-      icon: <AlertTriangle size={13} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-    }
-  }
-  if (status.startsWith('upload_failed')) {
-    return {
-      text: 'Drive upload failed',
-      color: 'var(--danger)',
-      icon: <AlertCircle size={13} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-    }
-  }
-  return { text: status, color: 'var(--t3)', icon: null }
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BackupSection() {
-  // Backup list
-  const [backups, setBackups] = useState<BackupFile[]>([])
-  const [backupDir, setBackupDir] = useState('')
-  const [loadingList, setLoadingList] = useState(false)
+  const { user } = useAuth()
+  const isSuperAdmin = user?.role === 'SUPERADMIN'
 
-  // Create backup
+  // Backup State
   const [creating, setCreating] = useState(false)
-  const [lastResult, setLastResult] = useState<CreateBackupResponse | null>(null)
-  const [createError, setCreateError] = useState('')
+  const [error, setError] = useState('')
+  const [successResult, setSuccessResult] = useState<BackupResult | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [dbName, setDbName] = useState('accounts')
 
-  // Drive config
-  const [driveInfo, setDriveInfo] = useState<DriveStatusResponse | null>(null)
-  const [folderIdInput, setFolderIdInput] = useState('')
-  const [credJson, setCredJson] = useState<object | null>(null)
-  const [credFileName, setCredFileName] = useState('')
-  const [savingDrive, setSavingDrive] = useState(false)
-  const [driveMsg, setDriveMsg] = useState('')
-  const [driveMsgType, setDriveMsgType] = useState<'ok' | 'err'>('ok')
-  const [removingDrive, setRemovingDrive] = useState(false)
+  // Restore State
+  const [restoring, setRestoring] = useState(false)
+  const [restoreError, setRestoreError] = useState('')
+  const [restoreSuccess, setRestoreSuccess] = useState(false)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // ── Load on mount ──────────────────────────────────────────────────────────
+  // Fetch active database name on mount
   useEffect(() => {
-    fetchList()
-    fetchDriveStatus()
+    client.get<{ database_name: string }>('/backups/db-name/')
+      .then((res) => {
+        if (res.data && res.data.database_name) {
+          setDbName(res.data.database_name)
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to fetch database name:', err)
+      })
   }, [])
 
-  async function fetchList() {
-    setLoadingList(true)
-    try {
-      const data = await apiFetch<{ backups: BackupFile[]; backup_dir: string }>('/api/backups/')
-      setBackups(data.backups)
-      setBackupDir(data.backup_dir)
-    } catch {
-      // silent
-    } finally {
-      setLoadingList(false)
-    }
-  }
-
-  async function fetchDriveStatus() {
-    try {
-      const data = await apiFetch<DriveStatusResponse>('/api/backups/drive/status/')
-      setDriveInfo(data)
-      if (data.folder_id) setFolderIdInput(data.folder_id)
-    } catch {
-      // silent
-    }
-  }
-
-  // ── Create backup ─────────────────────────────────────────────────────────
   async function handleCreateBackup() {
     setCreating(true)
-    setCreateError('')
-    setLastResult(null)
+    setError('')
+    setSuccessResult(null)
+    setCopied(false)
+
     try {
-      const data = await apiFetch<CreateBackupResponse>('/api/backups/create/', {
-        method: 'POST'
+      const now = new Date()
+      const yyyy = now.getFullYear()
+      const mm = String(now.getMonth() + 1).padStart(2, '0')
+      const dd = String(now.getDate()).padStart(2, '0')
+      const hh = String(now.getHours()).padStart(2, '0')
+      const min = String(now.getMinutes()).padStart(2, '0')
+      const ss = String(now.getSeconds()).padStart(2, '0')
+      const timestamp = `${yyyy}${mm}${dd}_${hh}${min}${ss}`
+      
+      const defaultFilename = `backup_${dbName}_${timestamp}.dump`
+
+      if (!window.electronAPI?.selectBackupSavePath) {
+        throw new Error('Electron selectBackupSavePath API is not available.')
+      }
+
+      const { canceled, filePath } = await window.electronAPI.selectBackupSavePath(defaultFilename)
+      if (canceled || !filePath) {
+        setCreating(false)
+        return
+      }
+
+      const response = await client.get('/backups/create/', {
+        responseType: 'arraybuffer'
       })
-      setLastResult(data)
-      fetchList()
-    } catch (e: unknown) {
-      setCreateError(e instanceof Error ? e.message : 'Unknown error')
+
+      if (!window.electronAPI?.saveBackupFile) {
+        throw new Error('Electron saveBackupFile API is not available.')
+      }
+
+      const saveRes = await window.electronAPI.saveBackupFile(filePath, response.data)
+      if (!saveRes.success) {
+        throw new Error(saveRes.reason || 'Failed to save backup file.')
+      }
+
+      const filename = filePath.split(/[/\\]/).pop() || defaultFilename
+      const bytes = response.data.byteLength
+      const sizeReadable = formatBytes(bytes)
+
+      setSuccessResult({
+        filePath,
+        filename,
+        sizeReadable,
+        timestamp: now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+      })
+    } catch (err: any) {
+      console.error('Backup error:', err)
+      if (err.response?.data) {
+        try {
+          const decoder = new TextDecoder('utf-8')
+          const text = decoder.decode(err.response.data)
+          const json = JSON.parse(text)
+          setError(json.error || 'Backup creation failed on server.')
+        } catch {
+          setError('Backup creation failed.')
+        }
+      } else {
+        setError(err.message || 'An unexpected error occurred during backup.')
+      }
     } finally {
       setCreating(false)
     }
   }
 
-  // ── Delete backup ─────────────────────────────────────────────────────────
-  async function handleDelete(filename: string) {
-    if (!confirm(`Delete ${filename}?`)) return
-    try {
-      await apiFetch(`/api/backups/${filename}/`, { method: 'DELETE' })
-      setBackups((prev) => prev.filter((b) => b.filename !== filename))
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : 'Delete failed')
-    }
-  }
-
-  // ── Drive config ──────────────────────────────────────────────────────────
-  function handleCredFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
+  async function handleRestore(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
     if (!file) return
-    setCredFileName(file.name)
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      try {
-        const parsed = JSON.parse(ev.target?.result as string)
-        setCredJson(parsed)
-        setDriveMsg('')
-      } catch {
-        setDriveMsg('Invalid JSON file.')
-        setDriveMsgType('err')
-        setCredJson(null)
+
+    const confirmMsg = 
+      "WARNING: Restoring a database will overwrite all existing tables, structures, and business data.\n\n" +
+      "You will be automatically logged out after a successful restore to synchronize database records.\n\n" +
+      "Are you absolutely sure you want to proceed?"
+
+    if (!confirm(confirmMsg)) {
+      event.target.value = ''
+      return
+    }
+
+    setRestoring(true)
+    setRestoreError('')
+    setRestoreSuccess(false)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      // POST database dump to restore endpoint
+      await client.post('/backups/restore/', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        timeout: 300000 // 5 minutes timeout for large dumps
+      })
+
+      setRestoreSuccess(true)
+
+      // Clear authentication and trigger session expiration to redirect user to login
+      setTimeout(() => {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+      }, 2500)
+
+    } catch (err: any) {
+      console.error('Restore error:', err)
+      if (err.response?.data) {
+        if (typeof err.response.data === 'object') {
+          setRestoreError(err.response.data.error || 'Restore failed on server.')
+        } else {
+          setRestoreError(String(err.response.data))
+        }
+      } else {
+        setRestoreError(err.message || 'An unexpected error occurred during restore.')
       }
+    } finally {
+      setRestoring(false)
+      event.target.value = '' // Clear input
     }
-    reader.readAsText(file)
   }
 
-  async function handleSaveDrive() {
-    if (!credJson && !driveInfo?.configured) {
-      setDriveMsg('Please select a service account JSON file.')
-      setDriveMsgType('err')
+  function formatBytes(bytes: number, decimals = 2) {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const dm = decimals < 0 ? 0 : decimals
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
+  }
+
+  async function handleShowInFolder() {
+    if (!successResult) return
+    if (!window.electronAPI?.openFileLocation) {
+      alert('Electron openFileLocation API is not available.')
       return
     }
-    if (!folderIdInput.trim()) {
-      setDriveMsg('Please enter a Google Drive Folder ID.')
-      setDriveMsgType('err')
-      return
-    }
-    setSavingDrive(true)
-    setDriveMsg('')
-    try {
-      const body: Record<string, unknown> = { folder_id: folderIdInput.trim() }
-      if (credJson) body.credentials = credJson
-      const data = await apiFetch<{ success: boolean; message: string; service_account_email: string }>(
-        '/api/backups/drive/configure/',
-        { method: 'POST', body: JSON.stringify(body) }
-      )
-      setDriveMsg(data.message)
-      setDriveMsgType('ok')
-      fetchDriveStatus()
-      setCredJson(null)
-      setCredFileName('')
-    } catch (e: unknown) {
-      setDriveMsg(e instanceof Error ? e.message : 'Failed to save.')
-      setDriveMsgType('err')
-    } finally {
-      setSavingDrive(false)
+    const res = await window.electronAPI.openFileLocation(successResult.filePath)
+    if (!res.success) {
+      alert(`Could not open file location: ${res.reason}`)
     }
   }
 
-  async function handleRemoveDrive() {
-    if (!confirm('Remove Google Drive configuration?')) return
-    setRemovingDrive(true)
-    try {
-      await apiFetch('/api/backups/drive/configure/', { method: 'DELETE' })
-      setDriveInfo({ configured: false })
-      setFolderIdInput('')
-      setCredJson(null)
-      setCredFileName('')
-      setDriveMsg('Google Drive configuration removed.')
-      setDriveMsgType('ok')
-    } catch (e: unknown) {
-      setDriveMsg(e instanceof Error ? e.message : 'Failed to remove.')
-      setDriveMsgType('err')
-    } finally {
-      setRemovingDrive(false)
-    }
+  function handleCopyPath() {
+    if (!successResult) return
+    navigator.clipboard.writeText(successResult.filePath)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={{ maxWidth: '720px', animation: 'fadeIn 0.25s ease' }}>
-      {/* ── Section heading ───────────────────────────────────────────────── */}
-      <div className="page-hdr" style={{ marginBottom: '20px' }}>
+    <div style={{ maxWidth: '720px', margin: '0 auto', animation: 'fadeIn 0.3s ease' }}>
+      
+      {/* Page Header */}
+      <div className="page-hdr" style={{ marginBottom: '24px' }}>
         <div>
-          <div className="page-title">Database Backup</div>
+          <div className="page-title">Database Backup & Restore</div>
           <div className="page-sub">
-            Dumps the PostgreSQL database, compresses it, saves it locally, and optionally uploads it to Google Drive.
+            Manage your local offline PostgreSQL database backups and restore database state.
           </div>
         </div>
       </div>
 
-      {/* ── Create Backup ─────────────────────────────────────────────────── */}
-      <div className="card" style={{ marginBottom: '24px', boxShadow: 'var(--sh)' }}>
-        <div className="card-hdr" style={{ background: '#f8fafc' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Database size={18} color="var(--primary)" />
-            <span className="card-title">Create Backup</span>
+      {/* ── CARD 1: Offline Database Backup ── */}
+      <div className="card" style={{ boxShadow: 'var(--sh)', overflow: 'hidden', marginBottom: '24px' }}>
+        {/* Top Accent Gradient Bar */}
+        <div style={{
+          height: '4px',
+          background: 'linear-gradient(90deg, var(--primary) 0%, #a855f7 100%)'
+        }} />
+
+        <div style={{ padding: '32px', textAlign: 'center' }}>
+          
+          {/* Centered Pulsing Icon */}
+          <div style={{ display: 'inline-block', position: 'relative', marginBottom: '24px' }}>
+            <div style={{
+              width: '80px',
+              height: '80px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--primary)',
+              transition: 'all 0.3s ease',
+              boxShadow: creating ? '0 0 20px 5px rgba(99, 102, 241, 0.3)' : 'none'
+            }}>
+              <Database size={40} className={creating ? 'animate-pulse' : ''} />
+            </div>
+            {creating && (
+              <span className="spinner" style={{
+                position: 'absolute',
+                top: '-4px',
+                right: '-4px',
+                width: '24px',
+                height: '24px',
+                borderWidth: '3px'
+              }} />
+            )}
           </div>
-        </div>
-        <div style={{ padding: '20px' }}>
-          <p style={{ fontSize: '13px', color: 'var(--t2)', marginBottom: '16px' }}>
-            Dumps the PostgreSQL database, compresses it, saves it locally
-            {driveInfo?.configured ? ', and uploads it to Google Drive.' : '.'}
+
+          <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--t1)', marginBottom: '8px' }}>
+            {creating ? 'Running PostgreSQL Dump...' : 'Create Database Backup'}
+          </h3>
+          <p style={{ fontSize: '13px', color: 'var(--t2)', maxWidth: '500px', margin: '0 auto 24px' }}>
+            Initiating a backup runs <code>pg_dump</code> on the database server, creates a compressed binary format stream, and saves it to a path of your choosing.
           </p>
 
-          <button onClick={handleCreateBackup} disabled={creating} className="btn btn-primary">
+          {/* Backup Button */}
+          <button
+            onClick={handleCreateBackup}
+            disabled={creating || restoring}
+            className="btn btn-primary"
+            style={{
+              padding: '10px 24px',
+              fontSize: '13.5px',
+              fontWeight: 600,
+              gap: '8px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2) ',
+              cursor: (creating || restoring) ? 'not-allowed' : 'pointer'
+            }}
+          >
             {creating ? (
               <>
-                <span className="spinner" style={{ width: '12px', height: '12px', marginRight: '6px' }} />{' '}
-                Creating backup…
+                <span className="spinner" style={{ width: '14px', height: '14px', marginRight: '4px' }} />
+                Creating backup file...
               </>
             ) : (
               <>
-                <UploadCloud size={15} /> Create Backup Now
+                <Database size={15} /> Select Path & Start Backup
               </>
             )}
           </button>
 
-          {createError && (
-            <div
-              className="ferr"
-              style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <AlertCircle size={14} /> <span>{createError}</span>
-            </div>
-          )}
-
-          {lastResult && (
-            <div
-              style={{
-                marginTop: '16px',
-                background: 'var(--success-bg)',
-                border: '1px solid #bbf7d0',
-                borderRadius: 'var(--r)',
-                padding: '12px 16px',
-                color: '#047857'
-              }}
-            >
-              <p
-                style={{
-                  fontSize: '13px',
-                  margin: '4px 0',
-                  display: 'flex',
-                  gap: '6px',
-                  alignItems: 'center',
-                  fontWeight: 600
-                }}
-              >
-                <CheckCircle2 size={15} /> Backup created successfully!
-              </p>
-              <div
-                style={{
-                  marginTop: 8,
-                  paddingLeft: 21,
-                  fontSize: '12.5px',
-                  color: '#065f46',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4
-                }}
-              >
-                <span>
-                  <strong>File:</strong> {lastResult.filename}
-                </span>
-                <span>
-                  <strong>Size:</strong> {lastResult.size_readable}
-                </span>
-                <span>
-                  <strong>Created:</strong> {lastResult.created_at}
-                </span>
-                {lastResult.drive_status && (() => {
-                  const { text, color, icon } = driveStatusLabel(lastResult.drive_status)
-                  return (
-                    <span style={{ color }}>
-                      <strong>Drive status:</strong> {icon} {text}
-                      {lastResult.drive_link && (
-                        <a
-                          href={lastResult.drive_link}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{
-                            color: 'var(--primary)',
-                            textDecoration: 'none',
-                            marginLeft: '8px',
-                            fontWeight: 600
-                          }}
-                        >
-                          Open ↗
-                        </a>
-                      )}
-                    </span>
-                  )
-                })()}
+          {/* Backup Checklist */}
+          <div style={{
+            marginTop: '28px',
+            paddingTop: '20px',
+            borderTop: '1px solid var(--border)',
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '16px',
+            textAlign: 'left',
+            maxWidth: '520px',
+            margin: '28px auto 0'
+          }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+              <ShieldCheck size={16} style={{ color: '#10b981', marginTop: '2px', flexShrink: 0 }} />
+              <div>
+                <strong style={{ fontSize: '12.5px', color: 'var(--t1)', display: 'block' }}>100% Offline</strong>
+                <span style={{ fontSize: '11.5px', color: 'var(--t3)' }}>Saved directly to your hard drive or external device.</span>
               </div>
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Google Drive Setup ────────────────────────────────────────────── */}
-      <div className="card" style={{ marginBottom: '24px', boxShadow: 'var(--sh)' }}>
-        <div className="card-hdr" style={{ background: '#f8fafc' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-            <Cloud size={18} color="var(--primary)" />
-            <span className="card-title">Google Drive Connection</span>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+              <Server size={16} style={{ color: '#10b981', marginTop: '2px', flexShrink: 0 }} />
+              <div>
+                <strong style={{ fontSize: '12.5px', color: 'var(--t1)', display: 'block' }}>Custom format</strong>
+                <span style={{ fontSize: '11.5px', color: 'var(--t3)' }}>Uses pg_dump custom compressed format (.dump).</span>
+              </div>
+            </div>
           </div>
-          {driveInfo?.configured && <span className="badge badge-green">Connected</span>}
-        </div>
-        <div style={{ padding: '20px' }}>
-          {driveInfo?.configured && (
-            <div
-              style={{
-                background: 'var(--success-bg)',
-                border: '1px solid #bbf7d0',
-                borderRadius: 'var(--r)',
-                padding: '12px 16px',
-                marginBottom: '16px'
-              }}
-            >
-              <div style={{ fontSize: '12.5px', margin: '4px 0', display: 'flex', gap: '8px' }}>
-                <span style={{ color: '#059669', fontWeight: 600, minWidth: '120px' }}>
-                  Service Account
-                </span>
-                <span style={{ color: 'var(--t1)', wordBreak: 'break-all' }}>
-                  {driveInfo.service_account_email}
-                </span>
-              </div>
-              <div style={{ fontSize: '12.5px', margin: '4px 0', display: 'flex', gap: '8px' }}>
-                <span style={{ color: '#059669', fontWeight: 600, minWidth: '120px' }}>Folder ID</span>
-                <span style={{ color: 'var(--t1)', wordBreak: 'break-all' }}>{driveInfo.folder_id}</span>
+
+          {/* Error Message */}
+          {error && (
+            <div className="ferr" style={{
+              marginTop: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '12px 16px',
+              textAlign: 'left'
+            }}>
+              <AlertCircle size={18} style={{ flexShrink: 0 }} />
+              <div style={{ fontSize: '13px' }}>
+                <strong>Backup failed:</strong> {error}
               </div>
             </div>
           )}
 
-          {/* Credentials file picker */}
-          <div className="fgrp">
-            <label className="flabel">
-              Service Account JSON{driveInfo?.configured ? ' (re-upload to change)' : ''}
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="btn btn-outline"
-              >
-                📂 Choose File
-              </button>
-              <span style={{ fontSize: '13px', color: 'var(--t2)' }}>
-                {credFileName || (driveInfo?.configured ? '(credentials saved)' : 'No file chosen')}
-              </span>
-            </div>
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json,application/json"
-            onChange={handleCredFileChange}
-            style={{ display: 'none' }}
-          />
+          {/* Success Result Container */}
+          {successResult && (
+            <div style={{
+              marginTop: '24px',
+              background: 'var(--success-bg)',
+              border: '1px solid #bbf7d0',
+              borderRadius: 'var(--r)',
+              padding: '20px',
+              color: '#065f46',
+              textAlign: 'left',
+              animation: 'slideUp 0.3s ease'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <CheckCircle2 size={18} style={{ color: '#10b981' }} />
+                <span style={{ fontWeight: 600, fontSize: '13.5px', color: '#047857' }}>Backup Created Successfully!</span>
+              </div>
 
-          {/* Folder ID */}
-          <div className="fgrp" style={{ marginTop: '16px' }}>
-            <label className="flabel">Google Drive Folder ID</label>
-            <input
-              type="text"
-              value={folderIdInput}
-              onChange={(e) => setFolderIdInput(e.target.value)}
-              placeholder="e.g. 1A2B3C4D5E6F7G8H9I0J"
-              className="finput"
-            />
-            <p style={{ fontSize: '11px', color: 'var(--t3)', marginTop: '4px' }}>
-              Copy from the folder URL: drive.google.com/drive/folders/<strong>[this-part]</strong>
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-            <button onClick={handleSaveDrive} disabled={savingDrive} className="btn btn-primary">
-              {savingDrive ? 'Saving & Testing…' : 'Save & Test Connection'}
-            </button>
-
-            {driveInfo?.configured && (
-              <button onClick={handleRemoveDrive} disabled={removingDrive} className="btn btn-danger">
-                {removingDrive ? 'Removing…' : 'Remove Connection'}
-              </button>
-            )}
-          </div>
-
-          {driveMsg && (
-            <p
-              style={{
-                fontSize: '13px',
-                marginTop: '12px',
-                color: driveMsgType === 'ok' ? '#059669' : 'var(--danger)',
-                fontWeight: 500,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              {driveMsgType === 'ok' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}{' '}
-              {driveMsg}
-            </p>
-          )}
-
-          {/* Setup guide */}
-          <details
-            style={{ marginTop: '20px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}
-          >
-            <summary
-              style={{
-                fontSize: '13px',
-                fontWeight: 600,
-                color: 'var(--t2)',
-                cursor: 'pointer',
-                userSelect: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              <HelpCircle size={14} color="var(--primary)" /> How to set up Google Drive (first time)
-            </summary>
-            <ol
-              style={{
+              <div style={{
                 fontSize: '12.5px',
-                color: 'var(--t2)',
-                lineHeight: '1.8',
-                paddingLeft: '20px',
-                marginTop: '8px'
-              }}
-            >
-              <li>
-                Go to <strong>console.cloud.google.com</strong> → Create a new project.
-              </li>
-              <li>
-                Enable <strong>Google Drive API</strong> in APIs & Services.
-              </li>
-              <li>
-                Go to <strong>IAM & Admin → Service Accounts</strong> → Create Service Account.
-              </li>
-              <li>
-                Click the service account → <strong>Keys → Add Key → JSON</strong>. Download the file.
-              </li>
-              <li>
-                Open <strong>Google Drive</strong> → create or pick a folder for backups.
-              </li>
-              <li>
-                Right-click the folder → <strong>Share</strong> → paste the service account email
-                (ends in <em>@…gserviceaccount.com</em>) → give <strong>Editor</strong> access.
-              </li>
-              <li>Upload the JSON file above and enter the folder ID, then click Save & Test Connection.</li>
-            </ol>
-          </details>
-        </div>
-      </div>
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                background: 'rgba(255, 255, 255, 0.4)',
+                padding: '14px',
+                borderRadius: '6px',
+                border: '1px solid rgba(16, 185, 129, 0.1)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#065f46', opacity: 0.8 }}>File Name:</span>
+                  <span style={{ fontWeight: 500, fontFamily: 'monospace' }}>{successResult.filename}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#065f46', opacity: 0.8 }}>File Size:</span>
+                  <span style={{ fontWeight: 500 }}>{successResult.sizeReadable}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#065f46', opacity: 0.8 }}>Backup Date:</span>
+                  <span style={{ fontWeight: 500 }}>{successResult.timestamp}</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid rgba(16, 185, 129, 0.1)', paddingTop: '8px' }}>
+                  <span style={{ color: '#065f46', opacity: 0.8 }}>Saved Location:</span>
+                  <span style={{
+                    fontWeight: 500,
+                    fontFamily: 'monospace',
+                    fontSize: '11px',
+                    wordBreak: 'break-all',
+                    background: 'rgba(0, 0, 0, 0.04)',
+                    padding: '6px 8px',
+                    borderRadius: '4px'
+                  }}>{successResult.filePath}</span>
+                </div>
+              </div>
 
-      {/* ── Local Backup List ─────────────────────────────────────────────── */}
-      <div className="card" style={{ boxShadow: 'var(--sh)' }}>
-        <div className="card-hdr" style={{ background: '#f8fafc' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-            <Folder size={18} color="var(--primary)" />
-            <span className="card-title">Local Backups</span>
-          </div>
-          <button
-            onClick={fetchList}
-            className="btn btn-outline btn-icon"
-            title="Refresh list"
-            style={{ padding: '6px' }}
-          >
-            <RefreshCw size={14} />
-          </button>
-        </div>
-        <div style={{ padding: '20px' }}>
-          {backupDir && (
-            <p
-              style={{
-                fontSize: '12px',
-                color: 'var(--t3)',
-                marginBottom: '12px',
-                fontFamily: 'monospace',
-                wordBreak: 'break-all'
-              }}
-            >
-              Stored in: {backupDir}
-            </p>
-          )}
-
-          {loadingList ? (
-            <div style={{ textAlign: 'center', padding: '20px', color: 'var(--t3)' }}>
-              <span className="spinner" style={{ width: '16px', height: '16px', display: 'inline-block' }} />{' '}
-              Loading backups…
-            </div>
-          ) : backups.length === 0 ? (
-            <p style={{ fontSize: '13px', color: 'var(--t3)', textAlign: 'center', padding: '20px 0' }}>
-              No backups yet. Create your first backup above.
-            </p>
-          ) : (
-            <div className="tbl-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Filename</th>
-                    <th style={{ textAlign: 'right' }}>Size</th>
-                    <th style={{ textAlign: 'right' }}>Created</th>
-                    <th style={{ textAlign: 'center' }}>Delete</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {backups.map((b) => (
-                    <tr key={b.filename}>
-                      <td style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <FileText size={15} color="var(--t3)" /> {b.filename}
-                      </td>
-                      <td
-                        style={{
-                          textAlign: 'right',
-                          color: 'var(--t2)',
-                          fontVariantNumeric: 'tabular-nums'
-                        }}
-                      >
-                        {b.size_readable}
-                      </td>
-                      <td
-                        style={{
-                          textAlign: 'right',
-                          color: 'var(--t2)',
-                          fontVariantNumeric: 'tabular-nums'
-                        }}
-                      >
-                        {b.created_at}
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <button
-                          onClick={() => handleDelete(b.filename)}
-                          className="btn btn-ghost btn-icon"
-                          title={`Delete ${b.filename}`}
-                          style={{ color: 'var(--danger)', padding: 4 }}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {/* Action Buttons for Success State */}
+              <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                <button
+                  onClick={handleShowInFolder}
+                  className="btn btn-outline"
+                  style={{
+                    background: '#fff',
+                    borderColor: '#bbf7d0',
+                    color: '#065f46',
+                    fontSize: '12.5px',
+                    padding: '8px 16px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Folder size={14} /> Show in Folder
+                </button>
+                <button
+                  onClick={handleCopyPath}
+                  className="btn btn-outline"
+                  style={{
+                    background: '#fff',
+                    borderColor: '#bbf7d0',
+                    color: '#065f46',
+                    fontSize: '12.5px',
+                    padding: '8px 16px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Copy size={14} /> {copied ? 'Copied!' : 'Copy Path'}
+                </button>
+              </div>
             </div>
           )}
+
         </div>
+
+        {isSuperAdmin && (
+          <>
+            {/* ── CARD 2: Restore Database Backup (DANGER ZONE) ── */}
+            <div className="card" style={{
+              boxShadow: 'var(--sh)',
+              overflow: 'hidden',
+              borderLeft: '4px solid #f59e0b',
+              marginBottom: '24px'
+            }}>
+              <div style={{ padding: '24px' }}>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'rgba(245, 158, 11, 0.1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#d97706'
+                    }}>
+                      <Upload size={16} />
+                    </div>
+                    <div>
+                      <h4 style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--t1)', margin: 0 }}>Restore Database</h4>
+                      <span style={{ fontSize: '11.5px', color: 'var(--t3)' }}>Restore schema and tables from a local custom format file (.dump).</span>
+                    </div>
+                  </div>
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    background: '#fef3c7',
+                    color: '#d97706',
+                    padding: '2px 8px',
+                    borderRadius: '20px',
+                    letterSpacing: '0.05em'
+                  }}>DANGER ZONE</span>
+                </div>
+
+                <p style={{ fontSize: '12.5px', color: 'var(--t2)', lineHeight: '1.5', margin: '0 0 20px' }}>
+                  Restoring will cleanly drop the <code>public</code> database schema and reload all structural and data objects from your backup file.
+                </p>
+
+                {/* Action Trigger */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={creating || restoring}
+                    className="btn btn-outline"
+                    style={{
+                      borderColor: '#f59e0b',
+                      color: '#d97706',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                      padding: '8px 18px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      background: '#fff',
+                      cursor: (creating || restoring) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    <Upload size={14} /> Choose File & Restore
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".dump"
+                    onChange={handleRestore}
+                    style={{ display: 'none' }}
+                  />
+
+                  {restoring && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#d97706', fontSize: '13px', fontWeight: 500 }}>
+                      <span className="spinner" style={{
+                        width: '14px',
+                        height: '14px',
+                        borderWidth: '2px',
+                        borderColor: '#f59e0b',
+                        borderTopColor: 'transparent'
+                      }} />
+                      Restoring database state... Do not close window.
+                    </div>
+                  )}
+                </div>
+
+                {/* Restore Success Message */}
+                {restoreSuccess && (
+                  <div style={{
+                    marginTop: '16px',
+                    background: 'var(--success-bg)',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: 'var(--r)',
+                    padding: '12px 16px',
+                    color: '#047857',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '13px',
+                    animation: 'slideUp 0.25s ease'
+                  }}>
+                    <CheckCircle2 size={16} />
+                    <span>
+                      <strong>Database restored successfully!</strong> Session ending, redirecting to login to reload data...
+                    </span>
+                  </div>
+                )}
+
+                {/* Restore Error Message */}
+                {restoreError && (
+                  <div style={{
+                    marginTop: '16px',
+                    background: '#fee2e2',
+                    border: '1px solid #fca5a5',
+                    borderRadius: 'var(--r)',
+                    padding: '12px 16px',
+                    color: '#b91c1c',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '13px',
+                    animation: 'slideUp 0.25s ease'
+                  }}>
+                    <AlertTriangle size={16} />
+                    <span>
+                      <strong>Restore failed:</strong> {restoreError}
+                    </span>
+                  </div>
+                )}
+
+              </div>
+            </div>
+
+            {/* Info Info Card */}
+            <div className="card" style={{
+              padding: '16px 20px',
+              boxShadow: 'var(--sh)',
+              display: 'flex',
+              gap: '12px',
+              alignItems: 'flex-start',
+              borderLeft: '4px solid #6366f1',
+              background: '#f8fafc'
+            }}>
+              <Info size={18} style={{ color: '#6366f1', marginTop: '2px', flexShrink: 0 }} />
+              <div style={{ fontSize: '12.5px', color: 'var(--t2)', lineHeight: '1.5' }}>
+                <strong style={{ color: 'var(--t1)', display: 'block', marginBottom: '4px' }}>Restoring Backups manually</strong>
+                To restore the database manually via the terminal, run the following:
+                <code style={{
+                  display: 'block',
+                  marginTop: '6px',
+                  background: '#e2e8f0',
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  fontFamily: 'monospace',
+                  fontSize: '11px',
+                  color: '#1e293b'
+                }}>
+                  pg_restore -h localhost -U postgres -d [database_name] -c "[backup_file_path]"
+                </code>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

@@ -98,17 +98,18 @@ class OutstandingReportView(generics.GenericAPIView):
         rows = query_all(
             """
             SELECT c.customer_id, c.customer_name, c.mobile,
-                   COALESCE(SUM(i.due_amount), 0.00)              AS outstanding,
-                   COUNT(i.invoice_id)::int                    AS pending_invoices
+                   COALESCE(le.running_balance, 0.00) AS outstanding,
+                   0::int                             AS pending_invoices
             FROM   customers c
-            LEFT   JOIN invoices i
-                   ON  i.customer_id = c.customer_id
-                   AND i.company_id  = %s
-                   AND i.payment_status IN ('PENDING', 'PARTIAL')
-                   AND i.status = 'A'
+            LEFT JOIN LATERAL (
+                SELECT running_balance
+                FROM   ledger_entries
+                WHERE  customer_id = c.customer_id AND company_id = %s
+                ORDER  BY entry_id DESC
+                LIMIT  1
+            ) le ON TRUE
             WHERE  c.company_id = %s AND c.status = 'A'
-            GROUP  BY c.customer_id, c.customer_name, c.mobile
-            HAVING COALESCE(SUM(i.due_amount), 0.00) > 0
+              AND  COALESCE(le.running_balance, 0.00) > 0
             ORDER  BY outstanding DESC
             """,
             (company_id, company_id)

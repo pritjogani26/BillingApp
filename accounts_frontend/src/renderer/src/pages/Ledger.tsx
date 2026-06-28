@@ -703,7 +703,7 @@ export default function Ledger() {
         <>
           <div
             className="stats-grid"
-            style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 20 }}
+            style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginBottom: 20 }}
           >
             <div className="stat-card">
               <div className="stat-label">Total Outstanding</div>
@@ -718,13 +718,6 @@ export default function Ledger() {
                 {outstanding.length}
               </div>
               <div className="stat-sub">Active accounts</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Pending Invoices</div>
-              <div className="stat-value" style={{ fontSize: 22 }}>
-                {outstanding.reduce((s, r) => s + (Number(r.pending_invoices) || 0), 0)}
-              </div>
-              <div className="stat-sub">Awaiting settlement</div>
             </div>
           </div>
 
@@ -758,7 +751,6 @@ export default function Ledger() {
                     <tr>
                       <th>Customer</th>
                       <th>Mobile</th>
-                      <th style={{ textAlign: 'right' }}>Pending Invoices</th>
                       <th style={{ textAlign: 'right' }}>Outstanding Amount</th>
                       <th style={{ textAlign: 'right', paddingRight: 20 }}>Action</th>
                     </tr>
@@ -776,11 +768,7 @@ export default function Ledger() {
                             {r.customer_name}
                           </td>
                           <td className="t2 fs12">{r.mobile || '—'}</td>
-                          <td style={{ textAlign: 'right' }}>
-                            <span className="badge badge-yellow">
-                              {r.pending_invoices} Invoice(s)
-                            </span>
-                          </td>
+
                           <td
                             style={{
                               textAlign: 'right',

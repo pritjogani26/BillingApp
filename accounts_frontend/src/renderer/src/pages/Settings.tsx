@@ -384,7 +384,6 @@ export default function Settings() {
                           <input
                             type="text"
                             className={`finput ${companyFieldErrors.pan_number?.length ? 'err' : ''}`}
-                            required
                             maxLength={10}
                             value={companyForm.pan_number}
                             onChange={(e) =>

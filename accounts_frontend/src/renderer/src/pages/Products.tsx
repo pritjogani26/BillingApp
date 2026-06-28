@@ -161,8 +161,9 @@ export default function Products() {
   const handleInput = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const { name } = e.target
-    setForm({ ...form, [name]: e.target.value })
+    const { name, value } = e.target
+    const val = name === 'product_name' ? value.toUpperCase() : value
+    setForm({ ...form, [name]: val })
     if (formError) setFormError('')
     if (fieldErrors[name]) {
       setFieldErrors((prev) => ({ ...prev, [name]: [] }))
@@ -204,6 +205,7 @@ export default function Products() {
     setFieldErrors({})
     const payload = {
       ...form,
+      product_name: form.product_name.toUpperCase().trim(),
       customer_id: form.customer_id !== '' ? form.customer_id : null
     }
     createProductMutation.mutate(payload as typeof form)
@@ -221,6 +223,7 @@ export default function Products() {
     setFieldErrors({})
     const payload = {
       ...form,
+      product_name: form.product_name.toUpperCase().trim(),
       customer_id: form.customer_id !== '' ? form.customer_id : null
     }
     updateProductMutation.mutate({ id: selected.product_id, form: payload as typeof form })
@@ -306,6 +309,8 @@ export default function Products() {
             value={form.gst_percentage}
             onChange={handleInput}
             placeholder="18.0000"
+            readOnly
+            style={{ backgroundColor: '#F1F5F9', color: '#64748B', cursor: 'not-allowed' }}
           />
           {fieldErrors.gst_percentage?.map((errMsg, idx) => (
             <div key={idx} className="ferr">

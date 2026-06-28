@@ -721,19 +721,6 @@ export default function RetailInvoicePrint({
             {fmtDateLocal(invoice.invoice_date)}
             &nbsp;·&nbsp;
             {invoice.customer_name}
-            &nbsp;·&nbsp;
-            <span
-              style={{
-                color:
-                  invoice.payment_status === 'PAID'
-                    ? 'var(--success)'
-                    : invoice.payment_status === 'PARTIAL'
-                      ? 'var(--warning)'
-                      : 'var(--danger)'
-              }}
-            >
-              {invoice.payment_status}
-            </span>
           </div>
         </div>
         <div className="page-hdr-actions">

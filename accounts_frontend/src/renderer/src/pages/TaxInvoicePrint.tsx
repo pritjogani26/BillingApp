@@ -655,10 +655,7 @@ export default function TaxInvoicePrint({
             Tax Invoice&nbsp;<span style={{ color: 'var(--primary)' }}>#{invoice.invoice_number}</span>
           </div>
           <div className="page-sub" style={{ marginTop: 4 }}>
-            {fmtDate(invoice.invoice_date)}&nbsp;·&nbsp;{invoice.customer_name}&nbsp;·&nbsp;
-            <span style={{ color: invoice.payment_status === 'PAID' ? 'var(--success)' : invoice.payment_status === 'PARTIAL' ? 'var(--warning)' : 'var(--danger)' }}>
-              {invoice.payment_status}
-            </span>
+            {fmtDate(invoice.invoice_date)}&nbsp;·&nbsp;{invoice.customer_name}
           </div>
         </div>
         <div className="page-hdr-actions">

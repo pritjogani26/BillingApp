@@ -167,7 +167,6 @@ class InvoiceListView(generics.GenericAPIView):
         company_id = request.user.company_id
 
         customer_id    = request.query_params.get('customer_id')
-        payment_status = request.query_params.get('payment_status')
         invoice_type   = request.query_params.get('invoice_type')
         from_date      = request.query_params.get('from_date')
         to_date        = request.query_params.get('to_date')
@@ -177,8 +176,6 @@ class InvoiceListView(generics.GenericAPIView):
 
         if customer_id:
             where.append("i.customer_id = %s");    params.append(customer_id)
-        if payment_status:
-            where.append("i.payment_status = %s"); params.append(payment_status)
         if invoice_type:
             where.append("i.invoice_type = %s");   params.append(invoice_type)
         if from_date:
@@ -191,8 +188,8 @@ class InvoiceListView(generics.GenericAPIView):
             SELECT i.invoice_id, i.company_id, i.customer_id, i.invoice_number,
                    i.invoice_type, i.invoice_date, i.financial_year, i.due_date,
                    i.subtotal, i.cgst_amount, i.sgst_amount, i.igst_amount,
-                   i.discount_amount, i.round_off, i.grand_total, i.due_amount,
-                   i.payment_status, i.status, i.notes,
+                   i.discount_amount, i.round_off, i.grand_total,
+                   i.status, i.notes,
                    i.created_at, i.created_by, i.updated_at, i.updated_by,
                    c.customer_name,
                    c.mobile AS customer_mobile
@@ -335,12 +332,12 @@ class InvoiceListView(generics.GenericAPIView):
                         (company_id, customer_id, invoice_number, invoice_type,
                          invoice_date, financial_year, due_date,
                          subtotal, cgst_amount, sgst_amount, igst_amount,
-                         discount_amount, round_off, grand_total, due_amount,
-                         payment_status, status, notes,
+                         discount_amount, round_off, grand_total,
+                         status, notes,
                          created_at, created_by)
                     VALUES
-                        (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                         'PENDING','A',%s,NOW(),%s)
+                        (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                         'A',%s,NOW(),%s)
                     RETURNING *
                     """,
                     (
@@ -349,7 +346,7 @@ class InvoiceListView(generics.GenericAPIView):
                         invoice_date,      financial_year,    due_date,
                         subtotal,          total_cgst,        total_sgst,
                         total_igst,        discount_amount,   round_off,
-                        grand_total,       grand_total,
+                        grand_total,
                         d.get('notes', ''), user_id,
                     )
                 )
@@ -466,7 +463,7 @@ class InvoiceDetailView(generics.GenericAPIView):
         # ── 1. Fetch existing invoice ─────────────────────────────────────────
         existing_invoice = query_one(
             """
-            SELECT invoice_id, customer_id, invoice_number, due_amount, grand_total, status
+            SELECT invoice_id, customer_id, invoice_number, grand_total, status
             FROM   invoices
             WHERE  invoice_id = %s AND company_id = %s AND status = 'A'
             """,
@@ -488,32 +485,13 @@ class InvoiceDetailView(generics.GenericAPIView):
             )
 
         d     = serializer.validated_data
+        new_customer_id = d['customer_id']
         items = request.data.get('items', [])
 
         if not items:
             return common_response(
                 StatusCode.BAD_REQUEST.value,
                 "Invoice must have at least one item."
-            )
-
-        # ── 3. Check payments already recorded ──────────────────────────────────
-        pay_row = query_one(
-            """
-            SELECT COALESCE(SUM(amount), 0.00) AS total_paid
-            FROM   payments
-            WHERE  invoice_id = %s AND company_id = %s
-            """,
-            (invoice_id, company_id)
-        )
-        total_paid = Decimal(str(pay_row['total_paid'])) if pay_row else Decimal('0.00')
-
-        # ── 4. Customer change restriction ──────────────────────────────────────
-        old_customer_id = existing_invoice['customer_id']
-        new_customer_id = d['customer_id']
-        if old_customer_id != new_customer_id and total_paid > 0:
-            return common_response(
-                StatusCode.BAD_REQUEST.value,
-                f"Cannot change customer because payments (Rs. {total_paid:.2f}) have already been recorded for this invoice."
             )
 
         # ── 5. Validate customer exists ─────────────────────────────────────────
@@ -602,18 +580,6 @@ class InvoiceDetailView(generics.GenericAPIView):
         round_off   = rounded - pre_round
         grand_total = rounded
 
-        # ── 7. Verify new grand total >= payments received ────────────────────
-        if grand_total < total_paid:
-            return common_response(
-                StatusCode.BAD_REQUEST.value,
-                f"New grand total ({grand_total:.2f}) cannot be less than total payments already received ({total_paid:.2f}) for this invoice."
-            )
-
-        new_due = grand_total - total_paid
-        if new_due < Decimal('0.01'):
-            new_due = Decimal('0.00')
-        new_status = 'PAID' if new_due == Decimal('0.00') else ('PARTIAL' if total_paid > 0 else 'PENDING')
-
         financial_year = _financial_year(invoice_date)
         due_date       = d.get('due_date') or _due_date(invoice_date)
 
@@ -635,8 +601,6 @@ class InvoiceDetailView(generics.GenericAPIView):
                            discount_amount = %s,
                            round_off = %s,
                            grand_total = %s,
-                           due_amount = %s,
-                           payment_status = %s,
                            notes = %s,
                            updated_at = NOW(),
                            updated_by = %s
@@ -655,8 +619,6 @@ class InvoiceDetailView(generics.GenericAPIView):
                         discount_amount,
                         round_off,
                         grand_total,
-                        new_due,
-                        new_status,
                         d.get('notes', ''),
                         user_id,
                         invoice_id,
@@ -1019,15 +981,12 @@ class DashboardStatsView(generics.GenericAPIView):
     def get(self, request: Request):
         company_id = request.user.company_id
 
-        stats = query_one(
+        # Get count and billed for this month
+        inv_stats = query_one(
             """
             SELECT
-                COUNT(*)::int                                              AS total_invoices,
-                COALESCE(SUM(grand_total), 0.00)                           AS total_billed,
-                COALESCE(SUM(CASE WHEN payment_status = 'PENDING'
-                                  THEN due_amount END), 0.00)              AS total_pending,
-                COALESCE(SUM(grand_total - due_amount), 0.00)              AS total_collected,
-                COUNT(CASE WHEN payment_status = 'PENDING' THEN 1 END)::int AS pending_count
+                COUNT(*)::int                    AS total_invoices,
+                COALESCE(SUM(grand_total), 0.00) AS total_billed
             FROM   invoices
             WHERE  company_id = %s
               AND  status = 'A'
@@ -1035,6 +994,41 @@ class DashboardStatsView(generics.GenericAPIView):
             """,
             (company_id,)
         )
+
+        # Get total collected this month
+        payment_stats = query_one(
+            """
+            SELECT COALESCE(SUM(amount), 0.00) AS total_collected
+            FROM   payments
+            WHERE  company_id = %s
+              AND  payment_date >= date_trunc('month', CURRENT_DATE)
+            """,
+            (company_id,)
+        )
+
+        # Get total outstanding across all customers
+        outstanding_stats = query_one(
+            """
+            SELECT
+                COALESCE(SUM(le.running_balance), 0.00) AS total_pending,
+                COUNT(CASE WHEN le.running_balance > 0 THEN 1 END)::int AS pending_count
+            FROM (
+                SELECT DISTINCT ON (customer_id) running_balance
+                FROM   ledger_entries
+                WHERE  company_id = %s
+                ORDER  BY customer_id, entry_id DESC
+            ) le
+            """,
+            (company_id,)
+        )
+
+        stats = {
+            'total_invoices': inv_stats['total_invoices'],
+            'total_billed': inv_stats['total_billed'],
+            'total_collected': payment_stats['total_collected'],
+            'total_pending': outstanding_stats['total_pending'],
+            'pending_count': outstanding_stats['pending_count'],
+        }
 
         return common_response(
             StatusCode.OK.value,

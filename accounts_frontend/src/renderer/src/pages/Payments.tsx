@@ -1,7 +1,7 @@
 // src/renderer/src/pages/Payments.tsx
 
 import React, { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Search,
   AlertCircle,
@@ -9,14 +9,17 @@ import {
   Wallet,
   Building2,
   Smartphone,
-  FileCheck
+  FileCheck,
+  Plus,
+  X,
+  Calendar,
+  Edit3
 } from 'lucide-react'
 import client from '../api/client'
+import { parseApiError } from '../utils/errorHelper'
 
 interface Payment {
   payment_id: number
-  invoice_id: number
-  invoice_number: string
   customer_id: number
   customer_name: string
   payment_date: string
@@ -24,6 +27,12 @@ interface Payment {
   reference_number: string
   amount: number | string
   notes: string
+}
+
+interface CustomerInfo {
+  customer_id: number
+  customer_name: string
+  mobile?: string
 }
 
 const inr = (n: number | string | null | undefined) => {
@@ -45,6 +54,7 @@ const MethodIcon = ({ method }: { method: string }) => {
     CASH:   { icon: <Wallet size={12} />,    cls: 'badge-green',  label: 'Cash'   },
     NEFT:   { icon: <Building2 size={12} />, cls: 'badge-blue',   label: 'NEFT'   },
     RTGS:   { icon: <Building2 size={12} />, cls: 'badge-blue',   label: 'RTGS'   },
+    IMPS:   { icon: <Building2 size={12} />, cls: 'badge-blue',   label: 'IMPS'   },
     UPI:    { icon: <Smartphone size={12} />, cls: 'badge-yellow', label: 'UPI'   },
     CHEQUE: { icon: <FileCheck size={12} />, cls: 'badge-red',    label: 'Cheque' },
     CARD:   { icon: <CreditCard size={12} />, cls: 'badge-blue',  label: 'Card'  }
@@ -136,11 +146,121 @@ export default function Payments() {
   const loading = loadingPayments
   const error = paymentsError ? 'Failed to load payments.' : ''
 
+  const queryClient = useQueryClient()
+  const [showRecordModal, setShowRecordModal] = useState(false)
+  const [editPaymentId, setEditPaymentId] = useState<number | null>(null)
+  const [recordForm, setRecordForm] = useState({
+    customer_id: '',
+    amount: '',
+    payment_date: new Date().toISOString().slice(0, 10),
+    payment_method: 'IMPS',
+    reference_number: '',
+    notes: ''
+  })
+  const [recordError, setRecordError] = useState<React.ReactNode>('')
+  const [recordFieldErrors, setRecordFieldErrors] = useState<Record<string, string[]>>({})
+
+  const resetRecordForm = () => {
+    setRecordForm({
+      customer_id: '',
+      amount: '',
+      payment_date: new Date().toISOString().slice(0, 10),
+      payment_method: 'IMPS',
+      reference_number: '',
+      notes: ''
+    })
+    setRecordError('')
+    setRecordFieldErrors({})
+    setShowRecordModal(false)
+    setEditPaymentId(null)
+  }
+
+  const { data: dropdownCustomersData } = useQuery({
+    queryKey: ['customersDropdown'],
+    queryFn: async () => {
+      const res = await client.get('/customers/?search=')
+      return (res.data.data.customers || []) as CustomerInfo[]
+    },
+    enabled: showRecordModal
+  })
+  const customers = dropdownCustomersData || []
+
+  const createPaymentMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await client.post('/payments/', payload)
+      return res.data
+    },
+    onSuccess: () => {
+      resetRecordForm()
+      queryClient.invalidateQueries({ queryKey: ['payments'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['ledgerEntries'] })
+      queryClient.invalidateQueries({ queryKey: ['ledgerOutstanding'] })
+    },
+    onError: (err: any) => {
+      const { formError, fieldErrors } = parseApiError(err, 'Error recording payment.')
+      setRecordError(formError)
+      setRecordFieldErrors(fieldErrors)
+    }
+  })
+
+  const updatePaymentMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: number; payload: any }) => {
+      const res = await client.put(`/payments/${id}/`, payload)
+      return res.data
+    },
+    onSuccess: () => {
+      resetRecordForm()
+      queryClient.invalidateQueries({ queryKey: ['payments'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['ledgerEntries'] })
+      queryClient.invalidateQueries({ queryKey: ['ledgerOutstanding'] })
+    },
+    onError: (err: any) => {
+      const { formError, fieldErrors } = parseApiError(err, 'Error updating payment.')
+      setRecordError(formError)
+      setRecordFieldErrors(fieldErrors)
+    }
+  })
+
+  const openEdit = (p: Payment) => {
+    setRecordForm({
+      customer_id: String(p.customer_id),
+      amount: String(p.amount),
+      payment_date: p.payment_date,
+      payment_method: p.payment_method,
+      reference_number: p.reference_number || '',
+      notes: p.notes || ''
+    })
+    setEditPaymentId(p.payment_id)
+    setRecordError('')
+    setRecordFieldErrors({})
+    setShowRecordModal(true)
+  }
+
+  const handleRecordSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!recordForm.customer_id) {
+      setRecordError('Please select a customer.')
+      return
+    }
+    if (!recordForm.amount || Number(recordForm.amount) <= 0) {
+      setRecordError('Enter a valid amount.')
+      return
+    }
+    setRecordError('')
+    setRecordFieldErrors({})
+    if (editPaymentId !== null) {
+      updatePaymentMutation.mutate({ id: editPaymentId, payload: recordForm })
+    } else {
+      createPaymentMutation.mutate(recordForm)
+    }
+  }
+
   const filtered = payments.filter((p) => {
     const q = search.toLowerCase()
     const matchSearch =
       !search ||
-      (p.invoice_number ?? '').toLowerCase().includes(q) ||
       (p.customer_name ?? '').toLowerCase().includes(q)
     const matchMethod = !method || p.payment_method === method
     return matchSearch && matchMethod
@@ -156,7 +276,7 @@ export default function Payments() {
   ).length
 
   const digitalCount = filtered.filter((p) =>
-    ['UPI', 'CHEQUE', 'CARD'].includes(p.payment_method)
+    ['UPI', 'CHEQUE', 'CARD', 'IMPS'].includes(p.payment_method)
   ).length
 
   return (
@@ -165,8 +285,13 @@ export default function Payments() {
         <div>
           <div className="page-title">Payment History</div>
           <div className="page-sub">
-            All recorded payments across invoices. Record payments from the Invoices page.
+            All recorded payments across customer accounts. Record customer lump-sum payments directly.
           </div>
+        </div>
+        <div className="page-hdr-actions">
+          <button className="btn btn-primary" onClick={() => { setEditPaymentId(null); setShowRecordModal(true); }}>
+            <Plus size={15} /> Record Payment
+          </button>
         </div>
       </div>
 
@@ -247,6 +372,7 @@ export default function Payments() {
               <option value="CASH">Cash</option>
               <option value="NEFT">NEFT</option>
               <option value="RTGS">RTGS</option>
+              <option value="IMPS">IMPS</option>
               <option value="UPI">UPI</option>
               <option value="CHEQUE">Cheque</option>
               <option value="CARD">Card</option>
@@ -272,7 +398,7 @@ export default function Payments() {
               <CreditCard size={40} className="empty-icon" />
               <div className="empty-text">No Payments Found</div>
               <div className="empty-sub">
-                Payments are recorded from the Invoices page when you view an invoice.
+                Record a customer payment using the Record Payment button above.
               </div>
             </div>
           ) : (
@@ -280,31 +406,19 @@ export default function Payments() {
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>Invoice</th>
                   <th>Customer</th>
                   <th>Date</th>
                   <th>Method</th>
                   <th>Reference</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
                   <th>Notes</th>
+                  <th style={{ textAlign: 'right', width: 60 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((p) => (
                   <tr key={p.payment_id}>
                     <td className="t3 fs12">{p.payment_id}</td>
-                    <td>
-                      <span
-                        style={{
-                          color: 'var(--primary)',
-                          fontWeight: 600,
-                          fontFamily: 'monospace',
-                          fontSize: 13
-                        }}
-                      >
-                        {p.invoice_number}
-                      </span>
-                    </td>
                     <td style={{ fontWeight: 500 }}>{p.customer_name}</td>
                     <td className="t2 fs12">{fmt(p.payment_date)}</td>
                     <td>
@@ -327,6 +441,17 @@ export default function Payments() {
                       {inr(p.amount)}
                     </td>
                     <td className="t3 fs12">{p.notes || '—'}</td>
+                    <td>
+                      <div className="row gap-2 jc-end" style={{ paddingRight: 4 }}>
+                        <button
+                          className="btn btn-ghost btn-sm btn-icon"
+                          onClick={() => openEdit(p)}
+                          title="Edit"
+                        >
+                          <Edit3 size={13} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -334,6 +459,160 @@ export default function Payments() {
           )}
         </div>
       </div>
+      
+      {/* ── Record Payment Modal ── */}
+      {showRecordModal && (
+        <div className="overlay">
+          <div className="modal modal-sm" style={{ width: 440 }}>
+            <div className="modal-hdr">
+              <span className="modal-title">{editPaymentId ? 'Edit Payment' : 'Record Payment'}</span>
+              <button className="modal-close-btn" onClick={resetRecordForm}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleRecordSubmit}>
+              <div className="modal-body">
+                {recordError && (
+                  <div className="login-err" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ flex: 1 }}>{recordError}</div>
+                  </div>
+                )}
+                <div className="fgrp">
+                  <label className="flabel">Customer *</label>
+                  <select
+                    className={`finput ${recordFieldErrors.customer_id?.length ? 'err' : ''}`}
+                    value={recordForm.customer_id}
+                    onChange={(e) => setRecordForm({ ...recordForm, customer_id: e.target.value })}
+                  >
+                    <option value="">— Select Customer —</option>
+                    {customers.map((c) => (
+                      <option key={c.customer_id} value={c.customer_id}>
+                        {c.customer_name}
+                      </option>
+                    ))}
+                  </select>
+                  {recordFieldErrors.customer_id?.map((errMsg, idx) => (
+                    <div key={idx} className="ferr">{errMsg}</div>
+                  ))}
+                </div>
+                <div className="fgrid2">
+                  <div className="fgrp">
+                    <label className="flabel">Amount (₹) *</label>
+                    <input
+                      className={`finput ${recordFieldErrors.amount?.length ? 'err' : ''}`}
+                      type="number"
+                      step="0.0001"
+                      min="0.0001"
+                      value={recordForm.amount}
+                      onChange={(e) => setRecordForm({ ...recordForm, amount: e.target.value })}
+                      placeholder="0.00"
+                    />
+                    {recordFieldErrors.amount?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
+                  </div>
+                  <div className="fgrp">
+                    <label className="flabel">Payment Date *</label>
+                    <div style={{ position: 'relative' }}>
+                      <div
+                        className={`finput ${recordFieldErrors.payment_date?.length ? 'err' : ''}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          pointerEvents: 'none'
+                        }}
+                      >
+                        <span>{recordForm.payment_date ? fmt(recordForm.payment_date) : 'dd/mm/yyyy'}</span>
+                        <Calendar size={15} style={{ color: 'var(--t3)' }} />
+                      </div>
+                      <input
+                        type="date"
+                        required
+                        value={recordForm.payment_date}
+                        onChange={(e) => setRecordForm({ ...recordForm, payment_date: e.target.value })}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          opacity: 0,
+                          cursor: 'pointer'
+                        }}
+                      />
+                    </div>
+                    {recordFieldErrors.payment_date?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
+                  </div>
+                </div>
+                <div className="fgrid2">
+                  <div className="fgrp">
+                    <label className="flabel">Payment Method</label>
+                    <select
+                      className={`finput ${recordFieldErrors.payment_method?.length ? 'err' : ''}`}
+                      value={recordForm.payment_method}
+                      onChange={(e) => setRecordForm({ ...recordForm, payment_method: e.target.value })}
+                    >
+                      <option value="NEFT">NEFT</option>
+                      <option value="RTGS">RTGS</option>
+                      <option value="IMPS">IMPS</option>
+                      <option value="CHEQUE">Cheque</option>
+                      <option value="UPI">UPI</option>
+                      <option value="CASH">Cash</option>
+                      <option value="CARD">Card</option>
+                    </select>
+                    {recordFieldErrors.payment_method?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
+                  </div>
+                  <div className="fgrp">
+                    <label className="flabel">Reference / UTR</label>
+                    <input
+                      className={`finput ${recordFieldErrors.reference_number?.length ? 'err' : ''}`}
+                      value={recordForm.reference_number}
+                      onChange={(e) => setRecordForm({ ...recordForm, reference_number: e.target.value })}
+                      placeholder="Optional ref. number"
+                    />
+                    {recordFieldErrors.reference_number?.map((errMsg, idx) => (
+                      <div key={idx} className="ferr">{errMsg}</div>
+                    ))}
+                  </div>
+                </div>
+                <div className="fgrp">
+                  <label className="flabel">Notes</label>
+                  <input
+                    className={`finput ${recordFieldErrors.notes?.length ? 'err' : ''}`}
+                    value={recordForm.notes}
+                    onChange={(e) => setRecordForm({ ...recordForm, notes: e.target.value })}
+                    placeholder="Optional payment note"
+                  />
+                  {recordFieldErrors.notes?.map((errMsg, idx) => (
+                    <div key={idx} className="ferr">{errMsg}</div>
+                  ))}
+                </div>
+              </div>
+              <div className="modal-ftr">
+                <button type="button" className="btn btn-outline" onClick={resetRecordForm}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={createPaymentMutation.isPending || updatePaymentMutation.isPending}
+                >
+                  {editPaymentId
+                    ? (updatePaymentMutation.isPending ? 'Updating...' : 'Update Payment')
+                    : (createPaymentMutation.isPending ? 'Recording...' : 'Record Payment')
+                  }
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   )
 }

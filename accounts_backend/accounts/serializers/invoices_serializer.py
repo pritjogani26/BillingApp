@@ -38,8 +38,6 @@ class InvoiceSerializer(serializers.Serializer):
     discount_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0.00)
     round_off       = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     grand_total     = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
-    due_amount      = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
-    payment_status = serializers.ChoiceField(choices=['PENDING', 'PAID', 'PARTIAL'], required=False, default='PENDING')
     status          = serializers.CharField(max_length=1,   required=False)
     notes           = serializers.CharField(required=False,  allow_null=True, allow_blank=True)
     created_at      = serializers.DateTimeField(required=False, allow_null=True)

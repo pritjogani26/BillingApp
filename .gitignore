@@ -8,10 +8,6 @@ venv/
 env/
 ENV/
 
-.env
-*.env
-backend/.env
-
 *.log
 logs/
 users_middleware_errors

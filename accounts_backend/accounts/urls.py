@@ -14,7 +14,7 @@ from accounts.views.reports_view   import (
     MonthlySalesView,
     GSTR1ExcelDownloadView,
 )
-from accounts.views.backup_view import ListBackupsView,CreateBackupView, DeleteBackupView, DriveStatusView, ConfigureDriveView   
+from accounts.views.backup_view import BackupDatabaseView, RestoreDatabaseView, DatabaseNameView
 
 urlpatterns = [
 
@@ -59,9 +59,7 @@ urlpatterns = [
     path("reports/monthly-sales/",      MonthlySalesView.as_view(),        name="monthly_sales"),
     
     # ── Backups ──────────────────────────────────────────────────────────────
-    path("backups/",                    ListBackupsView.as_view(),      name="list-backups"),
-    path("backups/create/",             CreateBackupView.as_view(),     name="create-backup"),
-    path("backups/<str:filename>/",     DeleteBackupView.as_view(),     name="delete-backup"),
-    path("backups/drive/status/",       DriveStatusView.as_view(),      name="drive-status"),
-    path("backups/drive/configure/",    ConfigureDriveView.as_view(),   name="configure-drive"),
+    path("backups/create/",             BackupDatabaseView.as_view(),     name="create-backup"),
+    path("backups/restore/",            RestoreDatabaseView.as_view(),    name="restore-backup"),
+    path("backups/db-name/",            DatabaseNameView.as_view(),       name="db-name"),
 ]

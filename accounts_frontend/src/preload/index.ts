@@ -20,7 +20,13 @@ const customElectronAPI = {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
   saveInvoicePDF: (htmlContent: string, filename: string) =>
-    ipcRenderer.invoke('save-invoice-pdf', { htmlContent, filename })
+    ipcRenderer.invoke('save-invoice-pdf', { htmlContent, filename }),
+  selectBackupSavePath: (filename: string) =>
+    ipcRenderer.invoke('select-backup-save-path', { filename }),
+  saveBackupFile: (filePath: string, fileData: ArrayBuffer) =>
+    ipcRenderer.invoke('save-backup-file', { filePath, fileData }),
+  openFileLocation: (filePath: string) =>
+    ipcRenderer.invoke('open-file-location', { filePath })
 }
 
 if (process.contextIsolated) {

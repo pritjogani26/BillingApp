@@ -9,6 +9,16 @@ interface Window {
       htmlContent: string,
       filename: string
     ) => Promise<{ success: boolean; filePath?: string; reason?: string }>
+    selectBackupSavePath?: (
+      filename: string
+    ) => Promise<{ canceled: boolean; filePath?: string }>
+    saveBackupFile?: (
+      filePath: string,
+      fileData: ArrayBuffer
+    ) => Promise<{ success: boolean; reason?: string }>
+    openFileLocation?: (
+      filePath: string
+    ) => Promise<{ success: boolean; reason?: string }>
   }
   electron?: {
     process: {

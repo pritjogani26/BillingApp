@@ -218,4 +218,41 @@ function registerIpcHandlers(): void {
       })
     }
   })
+
+  // ── Database Backup ───────────────────────────────────────────────────────
+  ipcMain.handle('select-backup-save-path', async (_event, { filename }) => {
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+    const { canceled, filePath } = await dialog.showSaveDialog(win!, {
+      title: 'Save Database Backup',
+      defaultPath: join(app.getPath('downloads'), filename),
+      filters: [
+        { name: 'PostgreSQL Backup Files', extensions: ['dump'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+    return { canceled, filePath }
+  })
+
+  ipcMain.handle('save-backup-file', async (_event, { filePath, fileData }) => {
+    try {
+      const buffer = Buffer.from(fileData)
+      await new Promise<void>((resolve, reject) => {
+        writeFile(filePath, buffer, (err) => (err ? reject(err) : resolve()))
+      })
+      return { success: true }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { success: false, reason: message }
+    }
+  })
+
+  ipcMain.handle('open-file-location', async (_event, { filePath }) => {
+    try {
+      shell.showItemInFolder(filePath)
+      return { success: true }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { success: false, reason: message }
+    }
+  })
 }

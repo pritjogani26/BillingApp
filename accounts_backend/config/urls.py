@@ -6,5 +6,5 @@ urlpatterns = [
     path('api/', include('accounts.urls')),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Always serve media files as this is a local desktop application without an external reverse proxy (like Nginx)
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

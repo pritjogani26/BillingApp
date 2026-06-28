@@ -52,7 +52,6 @@ class PaymentListView(generics.GenericAPIView):
 
     def get(self, request: Request):
         company_id  = request.user.company_id
-        invoice_id  = request.query_params.get('invoice_id')
         customer_id = request.query_params.get('customer_id')
         from_date   = request.query_params.get('from_date')
         to_date     = request.query_params.get('to_date')
@@ -60,8 +59,6 @@ class PaymentListView(generics.GenericAPIView):
         where  = ["p.company_id = %s"]
         params = [company_id]
 
-        if invoice_id:
-            where.append("p.invoice_id = %s");  params.append(invoice_id)
         if customer_id:
             where.append("p.customer_id = %s"); params.append(customer_id)
         if from_date:
@@ -71,14 +68,12 @@ class PaymentListView(generics.GenericAPIView):
 
         rows = query_all(
             f"""
-            SELECT p.payment_id, p.invoice_id, p.company_id, p.customer_id,
+            SELECT p.payment_id, p.company_id, p.customer_id,
                    p.payment_date, p.payment_method, p.reference_number,
                    p.amount, p.notes,
                    p.created_at, p.created_by, p.updated_at, p.updated_by,
-                   i.invoice_number,
                    c.customer_name
             FROM   payments p
-            LEFT   JOIN invoices  i ON i.invoice_id  = p.invoice_id
             JOIN   customers c ON c.customer_id = p.customer_id
             WHERE  {' AND '.join(where)}
             ORDER  BY p.payment_date DESC, p.payment_id DESC
@@ -108,9 +103,9 @@ class PaymentListView(generics.GenericAPIView):
                 serializer.errors
             )
 
-        d          = serializer.validated_data
-        invoice_id = d['invoice_id']
-        amount     = Decimal(str(d['amount']))
+        d           = serializer.validated_data
+        customer_id = d['customer_id']
+        amount      = Decimal(str(d['amount']))
 
         if amount <= 0:
             return common_response(
@@ -119,40 +114,33 @@ class PaymentListView(generics.GenericAPIView):
             )
 
         try:
+            from accounts.views.invoices_view import recompute_customer_ledger
             with transaction.atomic():
-                invoice = query_one(
+                customer = query_one(
                     """
-                    SELECT invoice_id, customer_id, due_amount,
-                           invoice_number, payment_status
-                    FROM   invoices
-                    WHERE  invoice_id = %s AND company_id = %s AND status = 'A'
+                    SELECT customer_id, customer_name
+                    FROM   customers
+                    WHERE  customer_id = %s AND company_id = %s AND status = 'A'
                     """,
-                    (invoice_id, company_id)
+                    (customer_id, company_id)
                 )
-                if not invoice:
+                if not customer:
                     return common_response(
                         StatusCode.NOT_FOUND.value,
-                        get_message("NOT_FOUND", "Invoice")
-                    )
-
-                due = Decimal(str(invoice['due_amount']))
-                if amount > due:
-                    return common_response(
-                        StatusCode.BAD_REQUEST.value,
-                        f"Amount exceeds outstanding due of {due}."
+                        get_message("NOT_FOUND", "Customer")
                     )
 
                 payment = insert_returning(
                     """
                     INSERT INTO payments
-                        (invoice_id, company_id, customer_id, payment_date,
+                        (company_id, customer_id, payment_date,
                          payment_method, reference_number, amount, notes,
                          created_at, created_by)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s)
                     RETURNING *
                     """,
                     (
-                        invoice['invoice_id'], company_id, invoice['customer_id'],
+                        company_id, customer_id,
                         d['payment_date'],     d['payment_method'],
                         d.get('reference_number', ''),
                         amount,                d.get('notes', ''),
@@ -160,30 +148,16 @@ class PaymentListView(generics.GenericAPIView):
                     )
                 )
 
-                new_due    = due - amount
-                if new_due < Decimal('0.01'):
-                    new_due = Decimal('0.00')
-                new_status = 'PAID' if new_due == Decimal('0.00') else 'PARTIAL'
-
-                execute(
-                    """
-                    UPDATE invoices
-                    SET    due_amount     = %s,
-                           payment_status = %s,
-                           updated_at     = NOW(),
-                           updated_by     = %s
-                    WHERE  invoice_id = %s
-                    """,
-                    (new_due, new_status, user_id, invoice['invoice_id'])
-                )
-
                 _post_ledger(
-                    company_id,          invoice['customer_id'],
+                    company_id,          customer_id,
                     'PAYMENT',           payment['payment_id'],
                     d['payment_date'],
                     Decimal('0.00'),     amount,
-                    f"Payment received for {invoice['invoice_number']}",
+                    "Payment received",
                 )
+                
+                # Recompute customer ledger running balance chronologically
+                recompute_customer_ledger(company_id, customer_id)
 
         except Exception as e:
             return common_response(
@@ -194,10 +168,8 @@ class PaymentListView(generics.GenericAPIView):
         full_payment = query_one(
             """
             SELECT p.*,
-                   i.invoice_number,
                    c.customer_name
             FROM   payments p
-            LEFT   JOIN invoices  i ON i.invoice_id  = p.invoice_id
             JOIN   customers c ON c.customer_id = p.customer_id
             WHERE  p.payment_id = %s
             """,
@@ -222,10 +194,8 @@ class PaymentDetailView(generics.GenericAPIView):
         row = query_one(
             """
             SELECT p.*,
-                   i.invoice_number,
                    c.customer_name
             FROM   payments p
-            LEFT   JOIN invoices  i ON i.invoice_id  = p.invoice_id
             JOIN   customers c ON c.customer_id = p.customer_id
             WHERE  p.payment_id = %s AND p.company_id = %s
             """,
@@ -241,4 +211,182 @@ class PaymentDetailView(generics.GenericAPIView):
             StatusCode.OK.value,
             "Payment fetched successfully",
             self.get_serializer(row).data
+        )
+
+    def put(self, request: Request, payment_id: int):
+        company_id = request.user.company_id
+        user_id    = request.user.user_id
+
+        # ── 1. Fetch existing payment ─────────────────────────────────────────
+        existing_payment = query_one(
+            """
+            SELECT payment_id, customer_id, amount
+            FROM   payments
+            WHERE  payment_id = %s AND company_id = %s
+            """,
+            (payment_id, company_id)
+        )
+        if not existing_payment:
+            return common_response(
+                StatusCode.NOT_FOUND.value,
+                get_message("NOT_FOUND", "Payment")
+            )
+
+        # ── 2. Validate request payload ────────────────────────────────────────
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return common_response(
+                StatusCode.BAD_REQUEST.value,
+                get_message("INVALID_REQUEST"),
+                serializer.errors
+            )
+
+        d           = serializer.validated_data
+        new_customer_id = d['customer_id']
+        amount      = Decimal(str(d['amount']))
+
+        if amount <= 0:
+            return common_response(
+                StatusCode.BAD_REQUEST.value,
+                "Amount must be greater than 0."
+            )
+
+        try:
+            from accounts.views.invoices_view import recompute_customer_ledger
+            with transaction.atomic():
+                # ── 3. Validate customer exists ───────────────────────────────────
+                customer = query_one(
+                    """
+                    SELECT customer_id, customer_name
+                    FROM   customers
+                    WHERE  customer_id = %s AND company_id = %s AND status = 'A'
+                    """,
+                    (new_customer_id, company_id)
+                )
+                if not customer:
+                    return common_response(
+                        StatusCode.NOT_FOUND.value,
+                        get_message("NOT_FOUND", "Customer")
+                    )
+
+                # ── 4. Update payments table ──────────────────────────────────────
+                execute(
+                    """
+                    UPDATE payments
+                    SET    customer_id = %s,
+                           payment_date = %s,
+                           payment_method = %s,
+                           reference_number = %s,
+                           amount = %s,
+                           notes = %s,
+                           updated_at = NOW(),
+                           updated_by = %s
+                    WHERE  payment_id = %s AND company_id = %s
+                    """,
+                    (
+                        new_customer_id,
+                        d['payment_date'],
+                        d['payment_method'],
+                        d.get('reference_number', ''),
+                        amount,
+                        d.get('notes', ''),
+                        user_id,
+                        payment_id,
+                        company_id,
+                    )
+                )
+
+                # ── 5. Update ledger entry ────────────────────────────────────
+                ledger_entry = query_one(
+                    """
+                    SELECT entry_id, customer_id
+                    FROM   ledger_entries
+                    WHERE  reference_type = 'PAYMENT' AND reference_id = %s AND company_id = %s
+                    """,
+                    (payment_id, company_id)
+                )
+
+                if ledger_entry:
+                    if ledger_entry['customer_id'] != new_customer_id:
+                        # Customer changed: delete old ledger entry, insert new one
+                        execute("DELETE FROM ledger_entries WHERE entry_id = %s", (ledger_entry['entry_id'],))
+                        insert_returning(
+                            """
+                            INSERT INTO ledger_entries
+                                (company_id, customer_id, transaction_type, reference_type,
+                                 reference_id, transaction_date, debit_amount, credit_amount,
+                                 running_balance, remarks, created_at)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                            RETURNING entry_id
+                            """,
+                            (
+                                company_id, new_customer_id,
+                                'CREDIT', 'PAYMENT', payment_id, d['payment_date'],
+                                Decimal('0.00'), amount,
+                                Decimal('0.00'), "Payment received",
+                            )
+                        )
+                        # Recompute both ledgers
+                        recompute_customer_ledger(company_id, ledger_entry['customer_id'])
+                        recompute_customer_ledger(company_id, new_customer_id)
+                    else:
+                        # Customer didn't change: update existing ledger entry
+                        execute(
+                            """
+                            UPDATE ledger_entries
+                            SET    transaction_date = %s,
+                                   credit_amount = %s,
+                                   remarks = %s
+                            WHERE  entry_id = %s
+                            """,
+                            (
+                                d['payment_date'],
+                                amount,
+                                "Payment received",
+                                ledger_entry['entry_id']
+                            )
+                        )
+                        recompute_customer_ledger(company_id, new_customer_id)
+                else:
+                    # In case ledger entry doesn't exist, create it
+                    insert_returning(
+                        """
+                        INSERT INTO ledger_entries
+                            (company_id, customer_id, transaction_type, reference_type,
+                             reference_id, transaction_date, debit_amount, credit_amount,
+                             running_balance, remarks, created_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                        RETURNING entry_id
+                        """,
+                        (
+                            company_id, new_customer_id,
+                            'CREDIT', 'PAYMENT', payment_id, d['payment_date'],
+                            Decimal('0.00'), amount,
+                            Decimal('0.00'), "Payment received",
+                        )
+                    )
+                    recompute_customer_ledger(company_id, new_customer_id)
+
+        except Exception as e:
+            return common_response(
+                StatusCode.INTERNAL_SERVER_ERROR.value,
+                f"Failed to update payment: {str(e)}"
+            )
+
+        # ── 6. Return updated payment data ───────────────────────────────────
+        full_payment = query_one(
+            """
+            SELECT p.*,
+                   c.customer_name
+            FROM   payments p
+            JOIN   customers c ON c.customer_id = p.customer_id
+            WHERE  p.payment_id = %s AND p.company_id = %s
+            """,
+            (payment_id, company_id)
+        )
+
+        return common_response(
+            StatusCode.OK.value,
+            get_message("UPDATED", "Payment"),
+            self.get_serializer(full_payment).data
         )

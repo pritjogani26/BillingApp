@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, Eye, Edit, X, AlertCircle, FileText, Trash2, CreditCard, Printer, Download, Calendar } from 'lucide-react'
+import { Search, Plus, Eye, Edit, X, AlertCircle, FileText, Trash2, Printer, Download, Calendar } from 'lucide-react'
 import client from '../api/client'
 import TaxInvoicePrint from './TaxInvoicePrint'
 import RetailInvoicePrint from './RetailInvoicePrint1'
@@ -97,12 +97,6 @@ const formatDateToDDMMYYYY = (d: string) => {
   return `${parts[2]}/${parts[1]}/${parts[0]}`
 }
 
-const statusBadge = (s: string) => {
-  if (s === 'PAID') return <span className="badge badge-green">Paid</span>
-  if (s === 'PARTIAL') return <span className="badge badge-yellow">Partial</span>
-  return <span className="badge badge-red">Pending</span>
-}
-
 const emptyItem = (): InvoiceItem => ({
   product_id: 0,
   product_name: '',
@@ -176,7 +170,6 @@ const getFYDateRange = (fy: string, month: number) => {
 export default function Invoices() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatus] = useState('')
   const [typeFilter, setType] = useState('')
 
   // Modals
@@ -189,17 +182,7 @@ export default function Invoices() {
   // Direct download (no modal)
   const [downloadInvId, setDownloadInvId] = useState<number | null>(null)
 
-  // Payment modal
-  const [showPay, setShowPay] = useState(false)
-  const [payForm, setPayForm] = useState({
-    amount: '',
-    payment_date: '',
-    payment_method: 'CASH',
-    reference_number: '',
-    notes: ''
-  })
-  const [payError, setPayError] = useState<React.ReactNode>('')
-  const [payFieldErrors, setPayFieldErrors] = useState<Record<string, string[]>>({})
+
 
   // Create form
   const [cform, setCform] = useState(getInitialCform())
@@ -218,10 +201,9 @@ export default function Invoices() {
 
   // Queries
   const { data: invoicesData, isLoading: loadingInvoices, error: invoicesError } = useQuery({
-    queryKey: ['invoices', statusFilter, typeFilter, fromDate, toDate],
+    queryKey: ['invoices', typeFilter, fromDate, toDate],
     queryFn: async () => {
       const params = new URLSearchParams()
-      if (statusFilter) params.set('payment_status', statusFilter)
       if (typeFilter) params.set('invoice_type', typeFilter)
       if (fromDate) params.set('from_date', fromDate)
       if (toDate) params.set('to_date', toDate)
@@ -310,28 +292,7 @@ export default function Invoices() {
     }
   })
 
-  const createPaymentMutation = useMutation({
-    mutationFn: async (payload: any) => {
-      const res = await client.post('/payments/', payload)
-      return res.data
-    },
-    onSuccess: () => {
-      setShowPay(false)
-      setShowDetail(false)
-      setActiveInvoiceId(null)
-      setPayFieldErrors({})
-      queryClient.invalidateQueries({ queryKey: ['invoices'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-    },
-    onError: (err: any) => {
-      const { formError, fieldErrors } = parseApiError(err, 'Error recording payment.')
-      setPayError(formError)
-      setPayFieldErrors(fieldErrors)
-    }
-  })
-
   const cformLoading = createInvoiceMutation.isPending || updateInvoiceMutation.isPending
-  const payLoading = createPaymentMutation.isPending
 
   /* Load dropdowns when create modal opens */
   const openCreate = () => {
@@ -387,9 +348,10 @@ export default function Invoices() {
     setItems((prev) => {
       const next = [...prev]
       if (field === 'product_name') {
+        const uppercaseVal = val.toUpperCase()
         const prod = products.find(
           (p) =>
-            p.product_name.toLowerCase() === val.toLowerCase() &&
+            p.product_name.toLowerCase() === uppercaseVal.toLowerCase() &&
             String(p.customer_id) === String(cform.customer_id)
         )
         if (prod) {
@@ -405,7 +367,7 @@ export default function Invoices() {
           next[idx] = {
             ...next[idx],
             product_id: 0,
-            product_name: val
+            product_name: uppercaseVal
           }
         }
       } else {
@@ -502,55 +464,12 @@ export default function Invoices() {
     setSubmitPayload(null)
   }
 
-  /* Open payment dialog */
-  const openPay = () => {
-    if (!detailInv || detailLoading) return
-    setPayForm({
-      amount: String(Number(detailInv.due_amount).toFixed(2)),
-      payment_date: new Date().toISOString().slice(0, 10),
-      payment_method: 'NEFT',
-      reference_number: '',
-      notes: ''
-    })
-    setPayError('')
-    setPayFieldErrors({})
-    setShowPay(true)
-  }
-
   const handleCformChange = (field: string, val: string) => {
     setCform((prev) => ({ ...prev, [field]: val }))
     if (cformError) setCformError('')
     if (cfieldErrors[field]) {
       setCfieldErrors((prev) => ({ ...prev, [field]: [] }))
     }
-  }
-
-  const handlePayFormChange = (field: string, val: string) => {
-    setPayForm((prev) => ({ ...prev, [field]: val }))
-    if (payError) setPayError('')
-    if (payFieldErrors[field]) {
-      setPayFieldErrors((prev) => ({ ...prev, [field]: [] }))
-    }
-  }
-
-  /* Submit payment */
-  const handlePay = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!detailInv) return
-    if (!payForm.amount || Number(payForm.amount) <= 0) {
-      setPayError('Enter a valid amount.')
-      return
-    }
-    if (Number(payForm.amount) > Number(detailInv.due_amount)) {
-      setPayError(`Amount cannot exceed outstanding due of ${inr(detailInv.due_amount)}.`)
-      return
-    }
-    setPayError('')
-    setPayFieldErrors({})
-    createPaymentMutation.mutate({
-      invoice_id: detailInv.invoice_id,
-      ...payForm
-    })
   }
 
   /* ── Filtered display ── */
@@ -618,17 +537,7 @@ export default function Invoices() {
                 </option>
               ))}
             </select>
-            <select
-              className="finput"
-              style={{ width: 140, padding: '7px 10px' }}
-              value={statusFilter}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              <option value="">All Status</option>
-              <option value="PENDING">Pending</option>
-              <option value="PARTIAL">Partial</option>
-              <option value="PAID">Paid</option>
-            </select>
+
             <select
               className="finput"
               style={{ width: 130, padding: '7px 10px' }}
@@ -670,8 +579,6 @@ export default function Invoices() {
                   <th>Date</th>
                   <th>Type</th>
                   <th style={{ textAlign: 'right' }}>Grand Total</th>
-                  <th style={{ textAlign: 'right' }}>Due</th>
-                  <th>Status</th>
                   <th style={{ textAlign: 'right', paddingRight: 20 }}>Action</th>
                 </tr>
               </thead>
@@ -710,17 +617,6 @@ export default function Invoices() {
                     >
                       {inr(inv.grand_total)}
                     </td>
-                    <td
-                      style={{
-                        textAlign: 'right',
-                        fontWeight: 700,
-                        color: Number(inv.due_amount) > 0 ? 'var(--danger)' : 'var(--success)',
-                        fontVariantNumeric: 'tabular-nums'
-                      }}
-                    >
-                      {inr(inv.due_amount)}
-                    </td>
-                    <td>{statusBadge(inv.payment_status)}</td>
                     <td>
                       <div className="row jc-end gap-1" style={{ paddingRight: 4 }}>
                         <button
@@ -1002,11 +898,11 @@ export default function Invoices() {
                                 <input
                                   type="text"
                                   className="finput"
-                                  style={{ padding: '5px 8px', fontSize: 13 }}
+                                  style={{ padding: '5px 8px', fontSize: 13, textTransform: 'uppercase' }}
                                   placeholder={!cform.customer_id ? 'Choose Customer First' : 'Type or select product...'}
                                   disabled={!cform.customer_id}
                                   value={it.product_name || ''}
-                                  onChange={(e) => updateItem(idx, 'product_name', e.target.value)}
+                                  onChange={(e) => updateItem(idx, 'product_name', e.target.value.toUpperCase())}
                                   list={`products-datalist-${idx}`}
                                 />
                                 {cform.customer_id && (
@@ -1228,15 +1124,6 @@ export default function Invoices() {
                 </div>
               </div>
               <div className="row gap-2">
-                {detailInv.payment_status !== 'PAID' && (
-                  <button
-                    className="btn btn-primary row gap-1"
-                    onClick={openPay}
-                    disabled={detailLoading}
-                  >
-                    <CreditCard size={15} /> Record Payment
-                  </button>
-                )}
                 <button
                   className="btn btn-outline row gap-1"
                   onClick={() => {
@@ -1345,7 +1232,7 @@ export default function Invoices() {
                         <span className="t2 fs12">Date</span>
                         <span className="fw6 fs12" style={{ color: 'var(--t1)' }}>{fmt(detailInv.invoice_date)}</span>
                       </div>
-                      <div className="row jc-sb" style={{ padding: '5px 0', borderBottom: '1px dashed var(--border)' }}>
+                      <div className="row jc-sb" style={{ padding: '5px 0 0' }}>
                         <span className="t2 fs12">Type</span>
                         <span
                           className={`badge ${detailInv.invoice_type === 'TAX' ? 'badge-blue' : 'badge-yellow'}`}
@@ -1353,10 +1240,6 @@ export default function Invoices() {
                         >
                           {detailInv.invoice_type}
                         </span>
-                      </div>
-                      <div className="row jc-sb" style={{ padding: '5px 0 0' }}>
-                        <span className="t2 fs12">Status</span>
-                        {statusBadge(detailInv.payment_status)}
                       </div>
                     </div>
                   </div>
@@ -1586,34 +1469,6 @@ export default function Invoices() {
                           {inr(detailInv.grand_total)}
                         </span>
                       </div>
-                      <div className="row jc-sb" style={{ padding: '4px 0', borderTop: '1px dashed var(--border)' }}>
-                        <span className="t2">Amount Paid</span>
-                        <span className="fw6" style={{ color: 'var(--success)', fontVariantNumeric: 'tabular-nums' }}>
-                          {inr(Number(detailInv.grand_total) - Number(detailInv.due_amount))}
-                        </span>
-                      </div>
-                      <div
-                        className="row jc-sb"
-                        style={{
-                          padding: '6px 8px',
-                          marginTop: 6,
-                          borderRadius: 6,
-                          background: Number(detailInv.due_amount) > 0 ? 'var(--danger-bg)' : 'var(--success-bg)',
-                          border: Number(detailInv.due_amount) > 0 ? '1px solid #fee2e2' : '1px solid #dcfce7'
-                        }}
-                      >
-                        <span style={{ fontWeight: 700, color: Number(detailInv.due_amount) > 0 ? 'var(--danger)' : 'var(--success)' }}>Balance Due</span>
-                        <span
-                          style={{
-                            fontWeight: 800,
-                            fontSize: 14,
-                            fontVariantNumeric: 'tabular-nums',
-                            color: Number(detailInv.due_amount) > 0 ? 'var(--danger)' : 'var(--success)'
-                          }}
-                        >
-                          {inr(detailInv.due_amount)}
-                        </span>
-                      </div>
                     </div>
                   </div>
                 </>
@@ -1634,158 +1489,7 @@ export default function Invoices() {
         </div>
       )}
 
-      {/* ── Record Payment Modal ── */}
-      {showPay && detailInv && (
-        <div className="overlay" style={{ zIndex: 900 }}>
-          <div className="modal modal-sm" style={{ width: 440 }}>
-            <div className="modal-hdr">
-              <span className="modal-title">Record Payment</span>
-              <button className="modal-close-btn" onClick={() => setShowPay(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handlePay}>
-              <div className="modal-body">
-                {payError && (
-                  <div className="login-err" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
-                    <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
-                    <div style={{ flex: 1 }}>{payError}</div>
-                  </div>
-                )}
-                <div
-                  style={{
-                    background: '#F8FAFC',
-                    border: '1px solid var(--border)',
-                    borderRadius: 8,
-                    padding: '10px 14px',
-                    marginBottom: 16,
-                    fontSize: 13
-                  }}
-                >
-                  <div className="row jc-sb">
-                    <span className="t2">Invoice</span>
-                    <span className="fw6">{detailInv.invoice_number}</span>
-                  </div>
-                  <div className="row jc-sb" style={{ marginTop: 4 }}>
-                    <span className="t2">Grand Total</span>
-                    <span className="fw6">{inr(detailInv.grand_total)}</span>
-                  </div>
-                  <div className="row jc-sb" style={{ marginTop: 4 }}>
-                    <span className="t2">Outstanding</span>
-                    <span style={{ fontWeight: 800, color: 'var(--danger)' }}>
-                      {inr(detailInv.due_amount)}
-                    </span>
-                  </div>
-                </div>
-                <div className="fgrid2">
-                  <div className="fgrp">
-                    <label className="flabel">Amount (₹) *</label>
-                    <input
-                      className={`finput ${payFieldErrors.amount?.length ? 'err' : ''}`}
-                      type="number"
-                      step="0.0001"
-                      min="0.0001"
-                      max={Number(detailInv.due_amount)}
-                      value={payForm.amount}
-                      onChange={(e) => handlePayFormChange('amount', e.target.value)}
-                    />
-                    {payFieldErrors.amount?.map((errMsg, idx) => (
-                      <div key={idx} className="ferr">{errMsg}</div>
-                    ))}
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">Payment Date *</label>
-                    <div style={{ position: 'relative' }}>
-                      <div
-                        className={`finput ${payFieldErrors.payment_date?.length ? 'err' : ''}`}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          pointerEvents: 'none'
-                        }}
-                      >
-                        <span>{payForm.payment_date ? formatDateToDDMMYYYY(payForm.payment_date) : 'dd/mm/yyyy'}</span>
-                        <Calendar size={15} style={{ color: 'var(--t3)' }} />
-                      </div>
-                      <input
-                        type="date"
-                        required
-                        value={payForm.payment_date}
-                        onChange={(e) => handlePayFormChange('payment_date', e.target.value)}
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          width: '100%',
-                          height: '100%',
-                          opacity: 0,
-                          cursor: 'pointer'
-                        }}
-                      />
-                    </div>
-                    {payFieldErrors.payment_date?.map((errMsg, idx) => (
-                      <div key={idx} className="ferr">{errMsg}</div>
-                    ))}
-                  </div>
-                </div>
-                <div className="fgrid2">
-                  <div className="fgrp">
-                    <label className="flabel">Payment Method</label>
-                    <select
-                      className={`finput ${payFieldErrors.payment_method?.length ? 'err' : ''}`}
-                      value={payForm.payment_method}
-                      onChange={(e) => handlePayFormChange('payment_method', e.target.value)}
-                    >
-                      <option value="NEFT">NEFT</option>
-                      <option value="RTGS">RTGS</option>
-                      <option value="CHEQUE">Cheque</option>
-                      <option value="UPI">UPI</option>
-                      <option value="CASH">Cash</option>
-                      <option value="CARD">Card</option>
-                    </select>
-                    {payFieldErrors.payment_method?.map((errMsg, idx) => (
-                      <div key={idx} className="ferr">{errMsg}</div>
-                    ))}
-                  </div>
-                  <div className="fgrp">
-                    <label className="flabel">Reference / UTR</label>
-                    <input
-                      className={`finput ${payFieldErrors.reference_number?.length ? 'err' : ''}`}
-                      value={payForm.reference_number}
-                      onChange={(e) => handlePayFormChange('reference_number', e.target.value)}
-                      placeholder="Optional ref. number"
-                    />
-                    {payFieldErrors.reference_number?.map((errMsg, idx) => (
-                      <div key={idx} className="ferr">{errMsg}</div>
-                    ))}
-                  </div>
-                </div>
-                <div className="fgrp">
-                  <label className="flabel">Notes</label>
-                  <input
-                    className={`finput ${payFieldErrors.notes?.length ? 'err' : ''}`}
-                    value={payForm.notes}
-                    onChange={(e) => handlePayFormChange('notes', e.target.value)}
-                    placeholder="Optional payment note"
-                  />
-                  {payFieldErrors.notes?.map((errMsg, idx) => (
-                    <div key={idx} className="ferr">{errMsg}</div>
-                  ))}
-                </div>
-              </div>
-              <div className="modal-ftr">
-                <button type="button" className="btn btn-outline" onClick={() => setShowPay(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={payLoading}>
-                  {payLoading ? 'Recording...' : 'Record Payment'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+
 
       {/* ── Confirm Submit Modal ── */}
       {showConfirmSubmit && submitPayload && (

@@ -1,312 +1,259 @@
 import os
-import gzip
-import json
 import shutil
+import datetime
 import subprocess
-from datetime import datetime
-from pathlib import Path
+import tempfile
 
 from django.conf import settings
-from rest_framework import generics, status as http_status
+from django.http import FileResponse
+from django.db import connection
+from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.parsers import MultiPartParser, FormParser
+
 from accounts.common.auth import JWTAuthentication
 
-try:
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-    from google.oauth2 import service_account
-    from googleapiclient.errors import HttpError
-    GOOGLE_DRIVE_AVAILABLE = True
-except ImportError:
-    GOOGLE_DRIVE_AVAILABLE = False
 
-# ─── Constants ────────────────────────────────────────────────────────────────
-
-BACKUP_DIR  = Path(settings.BASE_DIR) / "backups"
-CONFIG_FILE = Path(settings.BASE_DIR) / "backup_config.json"
-DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
-def _load_config() -> dict:
-    if CONFIG_FILE.exists():
-        with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-
-def _save_config(config: dict):
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
-
-
-def _get_drive_service(credentials_info: dict):
-    creds = service_account.Credentials.from_service_account_info(
-        credentials_info, scopes=DRIVE_SCOPES
-    )
-    return build("drive", "v3", credentials=creds)
-
-
-def _human_size(size_bytes: int) -> str:
-    for unit in ("B", "KB", "MB", "GB"):
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024
-    return f"{size_bytes:.1f} TB"
-
-
-# ─── Views ────────────────────────────────────────────────────────────────────
-
-class CreateBackupView(generics.GenericAPIView):
+def _find_pg_dump():
     """
-    POST /backups/create/
-    Dumps the PostgreSQL database with pg_dump, compresses it with gzip,
-    saves it locally, and — if Google Drive is configured — uploads it there.
+    Locate pg_dump. Critical for a PyInstaller-frozen app, since the
+    target machine's PATH may not include PostgreSQL's bin folder.
     """
+    # 1. Explicit override via .env — most reliable for a deployed .exe
+    env_path = os.environ.get('PG_DUMP_PATH')
+    if env_path and os.path.exists(env_path):
+        return env_path
+
+    # 2. Try PATH
+    found = shutil.which('pg_dump')
+    if found:
+        return found
+
+    # 3. Dynamic lookup in C:\Program Files\PostgreSQL (prefers newest version)
+    pg_base_dir = r"C:\Program Files\PostgreSQL"
+    if os.path.exists(pg_base_dir):
+        try:
+            # Sort subdirs (like ['18', '17']) numerically descending
+            def subdir_sort_key(name):
+                try:
+                    return float(name)
+                except ValueError:
+                    return 0.0
+
+            subdirs = sorted(os.listdir(pg_base_dir), key=subdir_sort_key, reverse=True)
+            for subdir in subdirs:
+                candidate = os.path.join(pg_base_dir, subdir, "bin", "pg_dump.exe")
+                if os.path.exists(candidate):
+                    return candidate
+        except Exception as e:
+            print(f"[pg_dump dynamic search error] {e}")
+
+    # 4. Common Windows install locations fallback
+    common_paths = [
+        r"C:\Program Files\PostgreSQL\18\bin\pg_dump.exe",
+        r"C:\Program Files\PostgreSQL\17\bin\pg_dump.exe",
+        r"C:\Program Files\PostgreSQL\16\bin\pg_dump.exe",
+        r"C:\Program Files\PostgreSQL\15\bin\pg_dump.exe",
+        r"C:\Program Files\PostgreSQL\14\bin\pg_dump.exe",
+    ]
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+
+    return None
+
+
+class BackupDatabaseView(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes     = [IsAuthenticated]
 
-    def post(self, request, *args, **kwargs):
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    def get(self, request, *args, **kwargs):
+        db = settings.DATABASES['default']
 
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        sql_name  = f"backup_{timestamp}.sql"
-        gz_name   = f"backup_{timestamp}.sql.gz"
-        sql_path  = BACKUP_DIR / sql_name
-        gz_path   = BACKUP_DIR / gz_name
+        pg_dump_path = _find_pg_dump()
+        if not pg_dump_path:
+            return Response(
+                {"error": "pg_dump executable not found. Set PG_DUMP_PATH in .env."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-        db  = settings.DATABASES["default"]
+        # Use BACKUP_DIR from settings
+        backup_dir = settings.BACKUP_DIR
+        os.makedirs(backup_dir, exist_ok=True)
+
+        # Cleanup old backups (older than 7 days) to prevent disk bloat
+        try:
+            now = datetime.datetime.now()
+            for f in os.listdir(backup_dir):
+                if f.startswith("backup_") and (f.endswith(".dump") or f.endswith(".sql.gz")):
+                    fp = os.path.join(backup_dir, f)
+                    mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fp))
+                    if (now - mtime).days > 7:
+                        os.remove(fp)
+        except Exception as e:
+            print(f"[Backup cleanup error] {e}")
+
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"backup_{db['NAME']}_{timestamp}.dump"
+        filepath = os.path.join(backup_dir, filename)
+
         env = os.environ.copy()
-        env["PGPASSWORD"] = db.get("PASSWORD", "")
+        env['PGPASSWORD'] = db['PASSWORD']
 
-        # ── 1. pg_dump ────────────────────────────────────────────────────────
+        cmd = [
+            pg_dump_path,
+            '-h', db['HOST'],
+            '-p', str(db['PORT']),
+            '-U', db['USER'],
+            '-F', 'c',          # custom format, compressed, usable with pg_restore
+            '-f', str(filepath),
+            db['NAME'],
+        ]
+
         try:
             result = subprocess.run(
-                [
-                    "pg_dump",
-                    "-h", db.get("HOST", "localhost"),
-                    "-p", str(db.get("PORT", 5432)),
-                    "-U", db["USER"],
-                    "-d", db["NAME"],
-                    "--format=plain",
-                    f"--file={sql_path}",
-                ],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
-        except FileNotFoundError:
-            return Response(
-                {"error": "pg_dump not found. Make sure PostgreSQL bin directory is in PATH."},
-                status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+                cmd, env=env, capture_output=True, text=True, timeout=300
             )
         except subprocess.TimeoutExpired:
-            return Response(
-                {"error": "Backup timed out (exceeded 10 minutes)."},
-                status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+            return Response({"error": "Backup timed out."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except FileNotFoundError:
+            return Response({"error": f"pg_dump not found at {pg_dump_path}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         if result.returncode != 0:
+            print(f"[pg_dump error] {result.stderr}")
             return Response(
-                {"error": f"pg_dump failed: {result.stderr.strip()}"},
-                status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+                {"error": f"Backup failed: {result.stderr.strip()}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # ── 2. Compress ───────────────────────────────────────────────────────
         try:
-            with open(sql_path, "rb") as f_in, gzip.open(gz_path, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            sql_path.unlink()  # remove uncompressed copy
+            response = FileResponse(
+                open(filepath, 'rb'),
+                as_attachment=True,
+                filename=filename
+            )
+            return response
         except Exception as e:
             return Response(
-                {"error": f"Compression failed: {e}"},
-                status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+                {"error": f"Failed to serve backup file: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        file_size = gz_path.stat().st_size
 
-        # ── 3. Google Drive upload (optional) ─────────────────────────────────
-        drive_status  = "not_configured"
-        drive_file_id = None
-        drive_link    = None
-        config        = _load_config()
-
-        if config.get("credentials") and config.get("folder_id"):
-            if not GOOGLE_DRIVE_AVAILABLE:
-                drive_status = "libraries_missing"
-            else:
-                try:
-                    service       = _get_drive_service(config["credentials"])
-                    file_metadata = {"name": gz_name, "parents": [config["folder_id"]]}
-                    media         = MediaFileUpload(str(gz_path), mimetype="application/gzip", resumable=True)
-                    uploaded      = service.files().create(
-                        body=file_metadata, media_body=media, fields="id,webViewLink"
-                    ).execute()
-                    drive_file_id = uploaded.get("id")
-                    drive_link    = uploaded.get("webViewLink")
-                    drive_status  = "uploaded"
-                except HttpError as e:
-                    drive_status = f"upload_failed: {e}"
-                except Exception as e:
-                    drive_status = f"upload_failed: {e}"
-
-        return Response({
-            "success":       True,
-            "filename":      gz_name,
-            "size":          file_size,
-            "size_readable": _human_size(file_size),
-            "created_at":    timestamp,
-            "drive_status":  drive_status,
-            "drive_file_id": drive_file_id,
-            "drive_link":    drive_link,
-        })
-
-
-class ListBackupsView(generics.GenericAPIView):
-    """
-    GET /backups/
-    Returns a list of local backup files, newest first.
-    """
+class RestoreDatabaseView(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, *args, **kwargs):
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-
-        backups = []
-        for f in sorted(BACKUP_DIR.glob("backup_*.sql.gz"), reverse=True):
-            stat = f.stat()
-            backups.append({
-                "filename":      f.name,
-                "size":          stat.st_size,
-                "size_readable": _human_size(stat.st_size),
-                "created_at":    datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-            })
-
-        return Response({"backups": backups, "backup_dir": str(BACKUP_DIR)})
-
-
-class DeleteBackupView(generics.GenericAPIView):
-    """
-    DELETE /backups/<filename>/
-    Deletes a single local backup file.
-    """
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def delete(self, request, filename: str, *args, **kwargs):
-        if (
-            not filename.startswith("backup_")
-            or not filename.endswith(".sql.gz")
-            or "/" in filename
-            or "\\" in filename
-        ):
-            return Response(
-                {"error": "Invalid filename."},
-                status=http_status.HTTP_400_BAD_REQUEST,
-            )
-
-        file_path = BACKUP_DIR / filename
-        if not file_path.exists():
-            return Response(
-                {"error": "File not found."},
-                status=http_status.HTTP_404_NOT_FOUND,
-            )
-
-        file_path.unlink()
-        return Response({"success": True, "deleted": filename})
-
-
-class ConfigureDriveView(generics.GenericAPIView):
-    """
-    POST /backups/drive/configure/
-    Validates and saves a Google Drive service-account configuration.
-
-    Body:
-        credentials  – parsed JSON object from the service-account key file
-        folder_id    – Google Drive folder ID (from the folder URL)
-    """
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes     = [IsAuthenticated]
+    parser_classes         = [MultiPartParser, FormParser]
 
     def post(self, request, *args, **kwargs):
-        if not GOOGLE_DRIVE_AVAILABLE:
+        # Enforce SUPERADMIN role restriction (role_id = 1)
+        if getattr(request.user, 'role', None) != 'SUPERADMIN':
             return Response(
-                {
-                    "error": (
-                        "Google API libraries are not installed. "
-                        "Run: pip install google-api-python-client google-auth google-auth-httplib2"
-                    )
-                },
-                status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+                {"error": "Permission denied. Only Super Admins can restore the database."},
+                status=status.HTTP_403_FORBIDDEN
             )
 
-        config = _load_config()
-        credentials = request.data.get("credentials") or config.get("credentials")
-        folder_id   = (request.data.get("folder_id") or "").strip()
+        if 'file' not in request.FILES:
+            return Response({"error": "No file uploaded."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not credentials or not folder_id:
+        uploaded_file = request.FILES['file']
+        db = settings.DATABASES['default']
+
+        pg_dump_path = _find_pg_dump()
+        if not pg_dump_path:
             return Response(
-                {"error": "Both 'credentials' (JSON object) and 'folder_id' are required."},
-                status=http_status.HTTP_400_BAD_REQUEST,
+                {"error": "pg_dump/pg_restore executables not found. Set PG_DUMP_PATH in .env."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # Validate by making a real API call
+        pg_restore_path = pg_dump_path.replace('pg_dump.exe', 'pg_restore.exe')
+        if not os.path.exists(pg_restore_path):
+            return Response(
+                {"error": f"pg_restore executable not found at {pg_restore_path}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # 1. Save uploaded file to a temporary location
         try:
-            service = _get_drive_service(credentials)
-            service.files().list(
-                q=f"'{folder_id}' in parents",
-                pageSize=1,
-                fields="files(id)",
-            ).execute()
-        except HttpError as e:
-            return Response(
-                {"error": f"Google Drive rejected the request: {e}"},
-                status=http_status.HTTP_400_BAD_REQUEST,
-            )
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.dump') as temp_file:
+                for chunk in uploaded_file.chunks():
+                    temp_file.write(chunk)
+                temp_filepath = temp_file.name
         except Exception as e:
             return Response(
-                {"error": f"Could not connect to Google Drive: {e}"},
-                status=http_status.HTTP_400_BAD_REQUEST,
+                {"error": f"Failed to save uploaded file: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        config["credentials"] = credentials
-        config["folder_id"]   = folder_id
-        _save_config(config)
+        # 2. Terminate other connections and drop/recreate public schema
+        try:
+            db_name = db['NAME']
+            with connection.cursor() as cursor:
+                # Terminate other connections to database to prevent lock issues
+                cursor.execute(
+                    """
+                    SELECT pg_terminate_backend(pg_stat_activity.pid)
+                    FROM pg_stat_activity
+                    WHERE pg_stat_activity.datname = %s
+                      AND pid <> pg_backend_pid();
+                    """,
+                    [db_name]
+                )
+                # Clean drop of schema public and recreate
+                cursor.execute("DROP SCHEMA IF EXISTS public CASCADE;")
+                cursor.execute("CREATE SCHEMA public;")
+                cursor.execute("GRANT ALL ON SCHEMA public TO public;")
+                cursor.execute("GRANT ALL ON SCHEMA public TO postgres;")
+        except Exception as e:
+            if os.path.exists(temp_filepath):
+                os.remove(temp_filepath)
+            return Response(
+                {"error": f"Database preparation failed: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-        return Response({
-            "success":               True,
-            "message":               "Google Drive configured successfully.",
-            "service_account_email": credentials.get("client_email", "unknown"),
-            "folder_id":             folder_id,
-        })
+        # 3. Run pg_restore
+        env = os.environ.copy()
+        env['PGPASSWORD'] = db['PASSWORD']
 
-    def delete(self, request, *args, **kwargs):
-        config = _load_config()
-        config.pop("credentials", None)
-        config.pop("folder_id", None)
-        _save_config(config)
-        return Response({"success": True, "message": "Google Drive configuration removed."})
+        cmd = [
+            pg_restore_path,
+            '-h', db['HOST'],
+            '-p', str(db['PORT']),
+            '-U', db['USER'],
+            '-d', db['NAME'],
+            str(temp_filepath),
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd, env=env, capture_output=True, text=True, timeout=300
+            )
+        except subprocess.TimeoutExpired:
+            return Response({"error": "Restore operation timed out."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        finally:
+            # Clean up the temp file
+            if os.path.exists(temp_filepath):
+                os.remove(temp_filepath)
+
+        # pg_restore exit status 0 (success) or 1 (success with warnings) is fine.
+        # Exit status > 1 is fatal.
+        if result.returncode > 1:
+            print(f"[pg_restore error] {result.stderr}")
+            return Response(
+                {"error": f"Database restore failed: {result.stderr.strip()}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        return Response({"success": True, "message": "Database restored successfully."})
 
 
-class DriveStatusView(generics.GenericAPIView):
-    """
-    GET /backups/drive/status/
-    Returns the current Google Drive configuration status.
-    """
+class DatabaseNameView(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes     = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        config        = _load_config()
-        is_configured = bool(config.get("credentials") and config.get("folder_id"))
-
-        payload = {"configured": is_configured}
-        if is_configured:
-            payload["folder_id"]             = config.get("folder_id", "")
-            payload["service_account_email"] = config.get("credentials", {}).get("client_email", "")
-
-        return Response(payload)
+        db_name = settings.DATABASES['default']['NAME']
+        return Response({"database_name": db_name})

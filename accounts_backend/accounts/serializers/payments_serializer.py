@@ -4,13 +4,12 @@ from rest_framework import serializers
 
 class PaymentSerializer(serializers.Serializer):
     payment_id       = serializers.IntegerField(required=False)
-    invoice_id       = serializers.IntegerField(required=True)
     company_id       = serializers.IntegerField(required=False)
-    customer_id      = serializers.IntegerField(required=False)
+    customer_id      = serializers.IntegerField(required=True)
     payment_date     = serializers.DateField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=['CASH', 'CHEQUE', 'NEFT', 'RTGS', 'UPI', 'BANK', 'CARD'],
-        default='NEFT'
+        choices=['CASH', 'CHEQUE', 'NEFT', 'RTGS', 'IMPS', 'UPI', 'BANK', 'CARD'],
+        default='IMPS'
     )
     reference_number = serializers.CharField(max_length=255, required=False, allow_null=True, allow_blank=True)
     amount           = serializers.DecimalField(max_digits=12, decimal_places=2)
@@ -21,5 +20,4 @@ class PaymentSerializer(serializers.Serializer):
     updated_by       = serializers.IntegerField(required=False, allow_null=True)
 
     # Joined fields
-    invoice_number   = serializers.CharField(required=False, allow_null=True)
     customer_name    = serializers.CharField(required=False, allow_null=True)

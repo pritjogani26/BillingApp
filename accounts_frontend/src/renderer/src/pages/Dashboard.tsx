@@ -49,12 +49,6 @@ function StatCard({ icon: Icon, bg, color, label, value, sub, delay = 0 }: StatC
   )
 }
 
-const statusBadge = (s: string) => {
-  if (s === 'PAID') return <span className="badge badge-green">Paid</span>
-  if (s === 'PARTIAL') return <span className="badge badge-yellow">Partial</span>
-  return <span className="badge badge-red">Pending</span>
-}
-
 interface Invoice {
   invoice_id: number
   invoice_number: string
@@ -89,9 +83,9 @@ export default function Dashboard() {
   })
 
   const { data: invoicesData, isLoading: loadingInvoices } = useQuery({
-    queryKey: ['pendingInvoices'],
+    queryKey: ['recentInvoices'],
     queryFn: async () => {
-      const res = await client.get('/invoices/?payment_status=PENDING')
+      const res = await client.get('/invoices/')
       return (res.data.data.invoices || []) as Invoice[]
     }
   })
@@ -158,15 +152,15 @@ export default function Dashboard() {
               color="#F59E0B"
               label="Outstanding"
               value={inr(stats?.total_pending)}
-              sub={`${stats?.pending_count ?? 0} invoice(s) pending`}
+              sub={`${stats?.pending_count ?? 0} customer(s) with balance`}
               delay={0.2}
             />
           </div>
 
-          {/* Recent pending invoices */}
+          {/* Recent invoices */}
           <div className="card" style={{ animation: 'fadeUp 0.35s ease 0.25s both' }}>
             <div className="card-hdr">
-              <span className="card-title">Pending Invoices</span>
+              <span className="card-title">Recent Invoices</span>
               <button
                 className="btn btn-ghost btn-sm row gap-1"
                 onClick={() => navigate('/invoices')}
@@ -179,8 +173,8 @@ export default function Dashboard() {
               {invoices.length === 0 ? (
                 <div className="empty">
                   <TrendingUp size={40} className="empty-icon" />
-                  <div className="empty-text">No pending invoices</div>
-                  <div className="empty-sub">All invoices are settled — great job!</div>
+                  <div className="empty-text">No invoices found</div>
+                  <div className="empty-sub">Create your first invoice to get started!</div>
                 </div>
               ) : (
                 <table>
@@ -191,8 +185,6 @@ export default function Dashboard() {
                       <th>Date</th>
                       <th>Type</th>
                       <th style={{ textAlign: 'right' }}>Amount</th>
-                      <th style={{ textAlign: 'right' }}>Due</th>
-                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -224,7 +216,7 @@ export default function Dashboard() {
                         </td>
                         <td>
                           <span
-                            className={`badge ${inv.invoice_type === 'GST' ? 'badge-blue' : 'badge-yellow'}`}
+                            className={`badge ${inv.invoice_type === 'TAX' ? 'badge-blue' : 'badge-yellow'}`}
                           >
                             {inv.invoice_type}
                           </span>
@@ -232,10 +224,6 @@ export default function Dashboard() {
                         <td style={{ textAlign: 'right', fontWeight: 500 }}>
                           {inr(inv.grand_total)}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: '#EF4444' }}>
-                          {inr(inv.due_amount)}
-                        </td>
-                        <td>{statusBadge(inv.payment_status)}</td>
                       </tr>
                     ))}
                   </tbody>
